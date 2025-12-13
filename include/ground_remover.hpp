@@ -1,22 +1,32 @@
-#pragma once
+#ifndef FS_PERCEPTION_GROUND_REMOVER_HPP
+#define FS_PERCEPTION_GROUND_REMOVER_HPP
 
-// NOTA: Include diretto senza cartella
-#include "types.hpp" 
+#include "types.hpp"
+#include <vector>
+#include <limits> // Necessario per numeric_limits
 
 namespace fs_perception {
 
+// 1. Definiamo la struct qui, fuori dalla classe o pubblica dentro
+struct Bin {
+    float min_z = std::numeric_limits<float>::max();
+    bool has_points = false;
+};
+
 class GroundRemover {
 public:
-    /**
-     * @brief Rimuove il terreno usando "Lowest Point Representative" e segmentazione polare.
-     * Ottimizzato per Pandar40P sul musetto (gestisce bene angoli radenti).
-     * * @param cloud_in Input: Nuvola grezza dal LiDAR
-     * @param cloud_obstacles Output: Punti che NON sono terreno (coni potenziali)
-     * @param cloud_ground Output: Punti classificati come terreno (per debug in RViz)
-     */
-    void removeGround(const PointCloudConstPtr& cloud_in, 
-                      PointCloudPtr& cloud_obstacles, 
-                      PointCloudPtr& cloud_ground);
+    GroundRemover(); // Aggiungiamo il costruttore per inizializzare la grid
+    void removeGround(const PointCloudConstPtr& cloud_in, PointCloudPtr& cloud_obstacles, PointCloudPtr& cloud_ground);
+
+private:
+    // 2. Costanti definite qui per essere usate nel sizing
+    static constexpr int SEGMENTS = 100;
+    static constexpr int BINS = 100;
+    
+    // 3. Vettore 1D (molto più veloce di vector<vector>)
+    std::vector<Bin> grid_; 
 };
 
 } // namespace fs_perception
+
+#endif

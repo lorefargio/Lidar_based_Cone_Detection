@@ -13,6 +13,8 @@
 namespace fs_perception {
 
 Cone ConeEstimator::estimate(const PointCloudPtr& cluster) {
+    const float ground_z_level = -0.52f;
+
     Cone cone;
     cone.color = ConeColor::UNKNOWN; 
     cone.confidence = 0.0f;
@@ -33,8 +35,6 @@ Cone ConeEstimator::estimate(const PointCloudPtr& cluster) {
     PointT min_pt, max_pt;
     pcl::getMinMax3D(*cluster, min_pt, max_pt);
     
-    // Altezza corretta rispetto al terreno noto
-    float ground_z_level = -0.52f;
     cone.height = max_pt.z - ground_z_level; 
     cone.z = min_pt.z;
 
@@ -60,7 +60,7 @@ Cone ConeEstimator::estimate(const PointCloudPtr& cluster) {
     }
 
     // 3. LARGHEZZA:
-    if (max_width < 0.04f || max_width > 0.30f) {
+    if (max_width < 0.02f || max_width > 0.30f) {
         return cone;
     }
     

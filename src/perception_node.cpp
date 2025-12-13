@@ -32,44 +32,51 @@ public:
     }
 
 private:
+    fs_perception::PointCloudPtr cloud_str_{new fs_perception::PointCloud};
+    fs_perception::PointCloudPtr obstacles_str_{new fs_perception::PointCloud};
+    fs_perception::PointCloudPtr ground_str_{new fs_perception::PointCloud};
+
     void callback(const sensor_msgs::msg::PointCloud2::SharedPtr msg) {
         auto start_total = std::chrono::high_resolution_clock::now();
 
         // 1. Conversione
-        fs_perception::PointCloudPtr cloud(new fs_perception::PointCloud);
-        pcl::fromROSMsg(*msg, *cloud);
+        cloud_str_->clear();
+        pcl::fromROSMsg(*msg, *cloud_str_);
 
         // 2. Ground Removal
-        fs_perception::PointCloudPtr obstacles(new fs_perception::PointCloud);
-        fs_perception::PointCloudPtr ground(new fs_perception::PointCloud);
+        obstacles_str_->clear();
+        ground_str_->clear() ;
+
         fs_perception::GroundRemover remover;
-        remover.removeGround(cloud, obstacles, ground);
+        remover.removeGround(cloud_str_, obstacles_str_, ground_str_);
 
         // Debug Output
         sensor_msgs::msg::PointCloud2 ground_msg;
-        pcl::toROSMsg(*ground, ground_msg);
+        pcl::toROSMsg(*ground_str_, ground_msg);
         ground_msg.header = msg->header;
         pub_ground_->publish(ground_msg);
 
         sensor_msgs::msg::PointCloud2 no_ground_msg;
-        pcl::toROSMsg(*obstacles, no_ground_msg);
+        pcl::toROSMsg(*obstacles_str_, no_ground_msg);
         no_ground_msg.header = msg->header;
         pub_no_ground_->publish(no_ground_msg);
 
         // 3. Clustering
         std::vector<fs_perception::PointCloudPtr> clusters;
         fs_perception::StringClusterer clusterer;
-        clusterer.cluster(obstacles, clusters);
+        clusterer.cluster(obstacles_str_, clusters);
 
         std::vector<fs_perception::PointCloudPtr> merged_clusters;
         std::vector<bool> merged_flag(clusters.size(), false);
 
+        std::vector<Eigen::Vector4f> centroids(clusters.size());
+        for(size_t i=0; i<clusters.size(); ++i) {
+            pcl::compute3DCentroid(*clusters[i], centroids[i]);
+        }
+
         for (size_t i = 0; i < clusters.size(); ++i) {
             if (merged_flag[i]) continue;
 
-            // Calcola centroide A
-            Eigen::Vector4f cA;
-            pcl::compute3DCentroid(*clusters[i], cA);
 
             // Crea un nuovo super-cluster partendo da A
             fs_perception::PointCloudPtr super_cluster(new fs_perception::PointCloud(*clusters[i]));
@@ -82,10 +89,11 @@ private:
                 pcl::compute3DCentroid(*clusters[j], cB);
 
                 // Distanza XY tra i centroidi (ignora Z per unire base e punta)
-                float dist_xy = std::sqrt(std::pow(cA[0]-cB[0], 2) + std::pow(cA[1]-cB[1], 2));
+                float dx = centroids[i][0] -centroids[j][0] ;
+                float dy = centroids[i][1] -centroids[j][1] ;
 
                 // Se i centri sono vicini (es. < 30cm), sono lo stesso cono spezzato
-                if (dist_xy < 0.30f) {
+                if (dx*dx +dy*dy < (0.30f * 0.30f)) {
                     *super_cluster += *clusters[j]; // Unisci le nuvole
                     merged_flag[j] = true; // Marca B come unito
                 }
