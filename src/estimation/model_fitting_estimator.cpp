@@ -18,10 +18,12 @@ Cone ModelFittingEstimator::estimate(const PointCloudPtr& cluster) {
     cone.color = ConeColor::UNKNOWN;
     cone.confidence = 0.0f;
 
-    // Filtro base punti: RANSAC ha bisogno di un minimo di punti per fittare bene
-    if (cluster->size() < 10) return cone;
+    // Minimum point filter for RANSAC stability
+    if (cluster->size() < 10) {
+        return cone;
+    }
 
-    // --- PCA PRE-FILTERING (Crucial for Speed & Reliability) ---
+    // Phase 1: PCA Pre-filtering (Efficiency check)
     pcl::PCA<PointT> pca;
     pca.setInputCloud(cluster);
     Eigen::Vector3f eigenvalues = pca.getEigenValues().head<3>();
@@ -29,18 +31,19 @@ Cone ModelFittingEstimator::estimate(const PointCloudPtr& cluster) {
     float linearity = (l1 - l2) / l1;
     float scattering = l3 / l1;
 
+    // Reject objects that are too linear or not sufficiently volumetric
     if (linearity > config_.max_linearity || scattering < config_.min_scatter) {
         return cone;
     }
 
-    // --- CALCOLO STATISTICHE E POSIZIONE ---
+    // Phase 2: Height and Position statistics
     const float ground_z_level = -0.52f;
     PointT min_pt, max_pt;
     pcl::getMinMax3D(*cluster, min_pt, max_pt);
     cone.height = max_pt.z - ground_z_level;
     cone.z = min_pt.z;
 
-    // 1. ALTEZZA (Pre-filtro veloce)
+    // Fast height pre-filter
     if (cone.height < config_.min_height || cone.height > config_.max_height) {
         return cone;
     }
@@ -50,7 +53,7 @@ Cone ModelFittingEstimator::estimate(const PointCloudPtr& cluster) {
     cone.x = centroid[0];
     cone.y = centroid[1];
 
-    // 2. STIMA DELLE NORMALI (Più vicini per stabilità)
+    // Phase 3: Surface Normal Estimation for Cylinder Fitting
     pcl::NormalEstimation<PointT, pcl::Normal> ne;
     pcl::search::KdTree<PointT>::Ptr tree(new pcl::search::KdTree<PointT>());
     pcl::PointCloud<pcl::Normal>::Ptr cloud_normals(new pcl::PointCloud<pcl::Normal>);
@@ -60,7 +63,7 @@ Cone ModelFittingEstimator::estimate(const PointCloudPtr& cluster) {
     ne.setKSearch(15); 
     ne.compute(*cloud_normals);
 
-    // 3. FITTING DEL CILINDRO CON RANSAC
+    // Phase 4: Geometric Cylinder Fitting using RANSAC
     pcl::SACSegmentationFromNormals<PointT, pcl::Normal> seg;
     seg.setOptimizeCoefficients(true);
     seg.setModelType(pcl::SACMODEL_CYLINDER);
@@ -76,16 +79,16 @@ Cone ModelFittingEstimator::estimate(const PointCloudPtr& cluster) {
     pcl::PointIndices::Ptr inliers(new pcl::PointIndices);
     seg.segment(*inliers, *coefficients);
 
+    // Confidence assessment based on inlier percentage
     if (inliers->indices.empty()) {
         return cone;
     }
 
-    // 4. VALUTAZIONE CONFIDENZA
     float inlier_ratio = static_cast<float>(inliers->indices.size()) / static_cast<float>(cluster->size());
 
     if (inlier_ratio >= config_.min_inlier_ratio) {
-        cone.confidence = inlier_ratio; // Confidenza basata sulla percentuale di inliers
-        cone.color = ConeColor::BLUE; // Colore di default per visualizzazione
+        cone.confidence = inlier_ratio; 
+        cone.color = ConeColor::BLUE; // Placeholder color classification
     }
 
     return cone;

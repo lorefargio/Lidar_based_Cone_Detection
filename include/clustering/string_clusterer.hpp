@@ -6,13 +6,20 @@
 
 namespace fs_perception {
 
+/**
+ * @class StringClusterer
+ * @brief Ultra-fast linear clustering that exploits point scan order.
+ * 
+ * This algorithm assumes the LiDAR driver publishes points ordered by ring and firing sequence. 
+ * It groups consecutive points into "strings" if they are within a certain distance, 
+ * avoiding the need for a KD-Tree (O(N) complexity).
+ */
 class StringClusterer : public ClustererInterface {
 public:
     /**
-     * @brief Raggruppa i punti ostacolo in oggetti distinti.
-     * Sfrutta l'ordinamento spaziale/temporale dei punti per evitare KD-Tree (O(N)).
-     * * @param cloud Input: Nuvola ostacoli (senza terreno)
-     * @param clusters Output: Vettore di nuvole, dove ogni nuvola è un cluster (cono candidato)
+     * @brief Performs linear string clustering on the input point cloud.
+     * @param cloud Input obstacle point cloud.
+     * @param clusters Identified clusters.
      */
     void cluster(const PointCloudPtr& cloud, 
                  std::vector<PointCloudPtr>& clusters) override;

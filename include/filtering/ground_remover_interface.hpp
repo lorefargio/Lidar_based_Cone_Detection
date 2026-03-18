@@ -5,18 +5,21 @@
 namespace fs_perception {
 
 /**
- * @brief Interfaccia comune per la rimozione del suolo dalla point cloud.
- * Permette di scambiare algoritmi a runtime per migliorare l'accuratezza del rilevamento dei coni.
+ * @class GroundRemoverInterface
+ * @brief Common interface for all ground removal algorithms.
+ * 
+ * Defines the standard structure for separating ground points from obstacle points, 
+ * which is the first and most critical stage of the perception pipeline.
  */
 class GroundRemoverInterface {
 public:
     virtual ~GroundRemoverInterface() = default;
 
     /**
-     * @brief Divide la nuvola in punti ostacolo e punti terreno.
-     * @param cloud_in Nuvola di input filtrata (non-NaN e range limitato)
-     * @param cloud_obstacles Nuvola di output contenente gli oggetti (coni, marciapiedi, ecc.)
-     * @param cloud_ground Nuvola di output contenente i punti del suolo (per debug)
+     * @brief Separates the ground points from the input cloud.
+     * @param cloud_in[in] Input point cloud (filtered for NaNs and range).
+     * @param cloud_obstacles[out] Output cloud containing obstacle candidates.
+     * @param cloud_ground[out] Output cloud containing ground points for debug visualization.
      */
     virtual void removeGround(const PointCloudConstPtr& cloud_in, 
                               PointCloudPtr& cloud_obstacles, 

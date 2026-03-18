@@ -40,13 +40,7 @@ ros2 launch fs_lidar_perception foxglove.launch.py \
 - `ground_remover_type`: `bin_based`, `slope_based`, `patchwork`, `patchwork_official`
 - `clustering_algorithm`: `grid`, `euclidean`, `string`, `dbscan`, `adaptive_dbscan`, `voxel`
 - `estimator_type`: `rule_based`, `ransac`
-- `dynamic_width_decay`: (float) fattore di decadimento per le soglie dinamiche.
-- `pca_max_linearity`: (float) soglia PCA per scartare oggetti lineari.
-- `pca_min_scatter`: (float) soglia PCA per assicurare tridimensionalità.
-
 ---
 
 ## 🛠 Prossimi Sviluppi
 1.  **Debugging & Finetuning:** Affinamento continuo dei parametri PCA.
-2.  [**Tracking e Persistenza Temporale**](docs/temporal_persistence_and_tracking.md): Analisi delle strategie per dare "memoria" al sistema (Kalman Filter, Temporal Buffer).
-3.  **Color Recognition:** Estensione della pipeline per identificare il colore dei coni.

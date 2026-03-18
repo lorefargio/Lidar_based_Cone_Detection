@@ -4,39 +4,59 @@
 
 namespace fs_perception {
 
+/**
+ * @class RuleBasedEstimator
+ * @brief Classifies cones based on a set of geometric and statistical rules.
+ * 
+ * This estimator evaluates candidates using bounding box size, aspect ratio, 
+ * PCA-based shape features (Linearity, Planarity, Scattering), and intensity 
+ * with dynamic thresholds that adapt to the object's distance from the sensor.
+ */
 class RuleBasedEstimator : public EstimatorInterface {
 public:
+    /**
+     * @struct Config
+     * @brief Parameters governing the rule-based classification logic.
+     */
     struct Config {
-        float dynamic_width_decay = 0.005f; // decremento della min_width per metro
-        int min_points_at_10m = 10;         // numero minimo di punti attesi a 10 metri
+        float dynamic_width_decay = 0.005f; ///< Decrement for minimum width threshold per meter.
+        int min_points_at_10m = 10;         ///< Minimum points expected for a cone at 10 meters distance.
         
-        float min_height = 0.10f;
-        float max_height = 0.50f;
-        float base_min_width = 0.8f;
-        float max_width = 0.36f;
-        float min_aspect_ratio = 0.4f;
-        float max_aspect_ratio = 1.2f;
-        float max_width_diff_ratio = 2.5f;
-        float min_intensity = 5.0f;
+        float min_height = 0.10f;           ///< Minimum height threshold (meters).
+        float max_height = 0.50f;           ///< Maximum height threshold (meters).
+        float base_min_width = 0.10f;       ///< Base minimum width threshold (meters) at distance 0.
+        float max_width = 0.36f;            ///< Maximum allowed width (meters).
+        float min_aspect_ratio = 0.4f;      ///< Minimum width-to-height ratio.
+        float max_aspect_ratio = 2.0f;      ///< Maximum width-to-height ratio.
+        float max_width_diff_ratio = 2.5f;  ///< Maximum allowed ratio between the largest and smallest horizontal widths.
+        float min_intensity = 5.0f;         ///< Minimum average intensity threshold.
 
-        // Analisi PCA (Principal Component Analysis)
-        float max_linearity = 0.8f;   // Scarta oggetti lineari (paletti, gambe)
-        float max_planarity = 0.8f;   // Scarta oggetti piatti (pezzi di muro)
-        float min_scatter = 0.05f;    // Assicura che l'oggetto sia volumetrico
+        // Principal Component Analysis (PCA) thresholds for shape classification
+        float max_linearity = 0.8f;         ///< Threshold to reject highly linear objects (e.g., posts, legs).
+        float max_planarity = 0.8f;         ///< Threshold to reject highly planar objects (e.g., walls).
+        float min_scatter = 0.02f;          ///< Threshold to ensure the object has a volumetric shape.
     };
 
+    /**
+     * @brief Default constructor for RuleBasedEstimator.
+     */
     RuleBasedEstimator();
+
+    /**
+     * @brief Explicit constructor with custom configuration.
+     * @param config The custom configuration struct.
+     */
     explicit RuleBasedEstimator(const Config& config);
 
     /**
-     * @brief Stima posizione e colore di un cluster basandosi su regole geometriche statiche.
-     * @param cluster Punti di un singolo oggetto candidato
-     * @return Cone Struttura contenente posizione (XYZ) e confidenza
+     * @brief Estimates whether a cluster is a cone using static and dynamic geometric rules.
+     * @param cluster Point cloud of a single candidate object.
+     * @return Cone structure with pose and binary confidence (1.0 if accepted, 0.0 if rejected).
      */
     Cone estimate(const PointCloudPtr& cluster) override;
 
 private:
-    Config config_;
+    Config config_; ///< Current configuration parameters.
 };
 
 } // namespace fs_perception

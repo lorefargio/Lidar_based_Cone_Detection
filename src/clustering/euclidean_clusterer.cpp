@@ -10,22 +10,25 @@ EuclideanClusterer::EuclideanClusterer(float cluster_tolerance, int min_cluster_
       max_cluster_size_(max_cluster_size) {}
 
 void EuclideanClusterer::cluster(const PointCloudPtr& cloud, std::vector<PointCloudPtr>& clusters) {
-    if (cloud->empty()) return;
+    if (cloud->empty()) {
+        return;
+    }
 
-    // KD-Tree per la ricerca veloce dei vicini
+    // Initialize the search tree for efficient neighbor lookup
     pcl::search::KdTree<PointT>::Ptr tree(new pcl::search::KdTree<PointT>);
     tree->setInputCloud(cloud);
 
+    // Using the standard PCL Euclidean extraction method
     std::vector<pcl::PointIndices> cluster_indices;
     pcl::EuclideanClusterExtraction<PointT> ec;
-    ec.setClusterTolerance(cluster_tolerance_); // in metri
+    ec.setClusterTolerance(cluster_tolerance_);
     ec.setMinClusterSize(min_cluster_size_);
     ec.setMaxClusterSize(max_cluster_size_);
     ec.setSearchMethod(tree);
     ec.setInputCloud(cloud);
     ec.extract(cluster_indices);
 
-    // Converte gli indici in PointCloud
+    // Convert indices back to point clouds for each cluster
     for (const auto& indices : cluster_indices) {
         PointCloudPtr cluster_cloud(new PointCloud);
         for (const auto& idx : indices.indices) {

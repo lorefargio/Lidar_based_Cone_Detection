@@ -7,8 +7,11 @@ DBSCANClusterer::DBSCANClusterer(float eps, int min_pts, int min_cluster_size, i
     : eps_(eps), min_pts_(min_pts), min_cluster_size_(min_cluster_size), max_cluster_size_(max_cluster_size) {}
 
 void DBSCANClusterer::cluster(const PointCloudPtr& cloud, std::vector<PointCloudPtr>& clusters) {
-    if (cloud->empty()) return;
+    if (cloud->empty()) {
+        return;
+    }
 
+    // Initialize the search tree for efficient neighbor lookup
     pcl::search::KdTree<PointT>::Ptr tree(new pcl::search::KdTree<PointT>);
     tree->setInputCloud(cloud);
 
@@ -20,12 +23,14 @@ void DBSCANClusterer::cluster(const PointCloudPtr& cloud, std::vector<PointCloud
         if (visited[i]) continue;
         visited[i] = true;
 
+        // Core point check
         if (tree->radiusSearch(cloud->points[i], eps_, nn_indices, nn_dists) >= min_pts_) {
             PointCloudPtr current_cluster(new PointCloud);
             current_cluster->push_back(cloud->points[i]);
 
+            // BFS expansion from the core point
             std::queue<int> seed_queue;
-            for (size_t j = 1; j < nn_indices.size(); ++j) { // Start from 1 to skip itself
+            for (size_t j = 1; j < nn_indices.size(); ++j) { // Skip itself
                 int idx = nn_indices[j];
                 if (!visited[idx]) {
                     visited[idx] = true;
@@ -40,6 +45,8 @@ void DBSCANClusterer::cluster(const PointCloudPtr& cloud, std::vector<PointCloud
 
                 std::vector<int> curr_nn_indices;
                 std::vector<float> curr_nn_dists;
+                
+                // Expand if the neighbor is also a core point
                 if (tree->radiusSearch(cloud->points[curr_idx], eps_, curr_nn_indices, curr_nn_dists) >= min_pts_) {
                     for (size_t j = 1; j < curr_nn_indices.size(); ++j) {
                         int idx = curr_nn_indices[j];
@@ -51,6 +58,7 @@ void DBSCANClusterer::cluster(const PointCloudPtr& cloud, std::vector<PointCloud
                 }
             }
 
+            // Apply size filters before saving the cluster
             if (current_cluster->size() >= (size_t)min_cluster_size_ && current_cluster->size() <= (size_t)max_cluster_size_) {
                 clusters.push_back(current_cluster);
             }

@@ -1,7 +1,7 @@
 #include "utils/types.hpp"
 
 #include <pcl/pcl_base.h>
-#include <pcl/impl/pcl_base.hpp>      // <--- IMPORTANTE: include l'implementazione della base
+#include <pcl/impl/pcl_base.hpp>
 #include <pcl/filters/voxel_grid.h>
 #include <pcl/filters/impl/voxel_grid.hpp>
 #include <rclcpp/rclcpp.hpp>
@@ -15,12 +15,9 @@
 #include <fstream>
 #include <filesystem>
 
-
 #include "filtering/ground_remover_interface.hpp"
 #include "filtering/bin_based_ground_remover.hpp"
 #include "filtering/slope_based_ground_remover.hpp"
-#include "filtering/patchwork_pp_ground_remover.hpp"
-#include "filtering/official_patchwork_pp_ground_remover.hpp"
 #include "clustering/clusterer_interface.hpp"
 #include "clustering/string_clusterer.hpp"
 #include "clustering/euclidean_clusterer.hpp"
@@ -35,17 +32,31 @@
 
 using namespace std::chrono_literals;
 
+// Template instantiations for custom PCL point type
 namespace pcl {
   template class PCLBase<fs_perception::PointT>;
   template class VoxelGrid<fs_perception::PointT>;
 }
+
+/**
+ * @class LidarPerceptionNode
+ * @brief Main ROS 2 node that manages the entire LiDAR perception pipeline.
+ * 
+ * Orchestrates ground removal, clustering, and cone estimation. 
+ * Supports dynamic configuration of algorithms and parameters.
+ */
 class LidarPerceptionNode : public rclcpp::Node {
 public:
+    /**
+     * @brief Constructor for LidarPerceptionNode.
+     * Initializes all parameters, publishers, and subscribers.
+     */
     LidarPerceptionNode() : Node("lidar_perception_node") {
-        // --- Parametri ---
+        // --- Algorithm selection parameters ---
         this->declare_parameter<std::string>("clustering_algorithm", "grid");
         std::string algo = this->get_parameter("clustering_algorithm").as_string();
 
+        // Factory for clustering algorithms
         if (algo == "euclidean") {
             clusterer_ = std::make_unique<fs_perception::EuclideanClusterer>(0.35f, 3, 300);
             RCLCPP_INFO(this->get_logger(), "Clustering Algorithm: EUCLIDEAN (KD-Tree)");
@@ -57,17 +68,16 @@ public:
             RCLCPP_INFO(this->get_logger(), "Clustering Algorithm: DBSCAN (KD-Tree)");
         } else if (algo == "hdbscan") {
             clusterer_ = std::make_unique<fs_perception::AdaptiveDBSCANClusterer>(0.15f, 0.015f, 3, 3, 500);
-            RCLCPP_INFO(this->get_logger(), "Clustering Algorithm: ADAPTIVE-DBSCAN (HDBSCAN Variant)");
+            RCLCPP_INFO(this->get_logger(), "Clustering Algorithm: ADAPTIVE-DBSCAN (Distance Scaled)");
         } else if (algo == "voxel") {
             clusterer_ = std::make_unique<fs_perception::VoxelConnectedComponents>(0.15f, 3, 500);
             RCLCPP_INFO(this->get_logger(), "Clustering Algorithm: VOXEL CONNECTED COMPONENTS (3D Grid)");
         } else {
-            // Default: Grid (Fastest & robust for 20Hz)
             clusterer_ = std::make_unique<fs_perception::GridClusterer>(0.20f, 25.0f, 3, 300);
             RCLCPP_INFO(this->get_logger(), "Clustering Algorithm: GRID (2D Connected Components)");
         }
 
-        // --- Ground Removal Parametrizzazione ---
+        // Factory for ground removal algorithms
         this->declare_parameter<std::string>("ground_remover_type", "slope_based");
         std::string gr_type = this->get_parameter("ground_remover_type").as_string();
 
@@ -82,17 +92,20 @@ public:
             RCLCPP_INFO(this->get_logger(), "Ground Removal: Defaulting to SLOPE-BASED");
         }
 
+        // Post-filtering parameters (Downsampling)
         this->declare_parameter<bool>("use_voxel_filter", false);
         this->declare_parameter<double>("voxel_size", 0.05);
 
+        // Factory for estimation algorithms
         this->declare_parameter<std::string>("estimator_type", "rule_based");
         std::string est_type = this->get_parameter("estimator_type").as_string();
 
+        // Estimation parameters (PCA & Geometric rules)
         this->declare_parameter<double>("dynamic_width_decay", 0.005);
         this->declare_parameter<int>("min_points_at_10m", 10);
         this->declare_parameter<double>("pca_max_linearity", 0.8);
         this->declare_parameter<double>("pca_max_planarity", 0.8);
-        this->declare_parameter<double>("pca_min_scatter", 0.05);
+        this->declare_parameter<double>("pca_min_scatter", 0.02); // Keep optimized value
 
         if (est_type == "rule_based") {
             fs_perception::RuleBasedEstimator::Config config;
@@ -103,7 +116,7 @@ public:
             config.min_scatter = this->get_parameter("pca_min_scatter").as_double();
 
             estimator_ = std::make_unique<fs_perception::RuleBasedEstimator>(config);
-            RCLCPP_INFO(this->get_logger(), "Estimator Algorithm: RULE-BASED (Dynamic Thresholds)");
+            RCLCPP_INFO(this->get_logger(), "Estimator Algorithm: RULE-BASED (Geometric Classification)");
         } else if (est_type == "ransac") {
             estimator_ = std::make_unique<fs_perception::ModelFittingEstimator>();
             RCLCPP_INFO(this->get_logger(), "Estimator Algorithm: RANSAC MODEL FITTING (Cylinder)");
@@ -112,14 +125,15 @@ public:
             RCLCPP_INFO(this->get_logger(), "Estimator Algorithm: Defaulting to RULE-BASED");
         }
 
-        // --- Setup Profiler JSON ---
+        // Benchmarking Setup
         std::string log_dir = "/home/lore/lidar_ws/log_profiler/";
-        std::filesystem::create_directories(log_dir); // Ensure directory exists
+        std::filesystem::create_directories(log_dir); 
         
         profiler_ = std::make_unique<fs_perception::PerformanceProfiler>(algo);
         json_file_path_ = log_dir + "profiler_" + algo + ".json";
-        RCLCPP_INFO(this->get_logger(), "Profiler inizializzato. Salverà su: %s", json_file_path_.c_str());
+        RCLCPP_INFO(this->get_logger(), "Profiler initialized. Will save to: %s", json_file_path_.c_str());
 
+        // --- ROS Infrastructure (Pub/Sub) ---
         rclcpp::QoS qos(10);
         qos.reliability(rclcpp::ReliabilityPolicy::Reliable);
         qos.durability(rclcpp::DurabilityPolicy::Volatile);
@@ -133,28 +147,37 @@ public:
         pub_ground_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/perception/ground_debug", 10);
         pub_no_ground_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/perception/no_ground", 10);
 
-        RCLCPP_INFO(this->get_logger(), "Nodo Perception Avviato.");
+        RCLCPP_INFO(this->get_logger(), "Perception Node Started.");
     }
 
+    /**
+     * @brief Destructor for LidarPerceptionNode.
+     * Ensures all benchmarking profiling data is flushed to disk on shutdown.
+     */
     ~LidarPerceptionNode() {
         if (profiler_) {
             profiler_->saveToJSON(json_file_path_);
-            RCLCPP_INFO(this->get_logger(), "Profilazione salvata su JSON in chiusura.");
+            RCLCPP_INFO(this->get_logger(), "Profiling data saved to JSON before exit.");
         }
     }
 
 private:
+    /**
+     * @brief Point cloud processing callback function.
+     * Executes the entire perception pipeline frame-by-frame.
+     * @param msg Incoming PointCloud2 message from the LiDAR sensor.
+     */
     void callback(const sensor_msgs::msg::PointCloud2::SharedPtr msg) {
         frame_counter_++;
         profiler_->startFrame();
 
-        // 1. Conversione
+        // Phase 1: Point cloud conversion from ROS to PCL
         fs_perception::PointCloudPtr raw_cloud(new fs_perception::PointCloud);
         pcl::fromROSMsg(*msg, *raw_cloud);
         
         if (raw_cloud->empty()) return;
 
-        // 2. Ground Removal (Su nuvola a piena risoluzione per massima precisione)
+        // Phase 2: Ground Removal (Run on full resolution for maximum precision)
         profiler_->startTimer("ground_removal");
         obstacles_str_->clear();
         ground_str_->clear();
@@ -162,7 +185,7 @@ private:
         ground_remover_->removeGround(raw_cloud, obstacles_str_, ground_str_);
         profiler_->stopTimer("ground_removal");
 
-        // 2.1 Voxel Grid Downsampling (Solo sugli ostacoli per velocizzare Clustering ed Estimation)
+        // Phase 2.1: Optional Voxel Grid Downsampling to speed up subsequent stages
         if (this->get_parameter("use_voxel_filter").as_bool()) {
             double leaf_size = this->get_parameter("voxel_size").as_double();
             pcl::VoxelGrid<fs_perception::PointT> voxel_grid;
@@ -174,7 +197,7 @@ private:
             obstacles_str_ = filtered_obstacles;
         }
 
-        // Debug Output
+        // Publish debug ground clouds
         sensor_msgs::msg::PointCloud2 ground_msg;
         pcl::toROSMsg(*ground_str_, ground_msg);
         ground_msg.header = msg->header;
@@ -185,32 +208,33 @@ private:
         no_ground_msg.header = msg->header;
         pub_no_ground_->publish(no_ground_msg);
 
-        // 3. Clustering
+        // Phase 3: Object Clustering
         profiler_->startTimer("clustering");
         std::vector<fs_perception::PointCloudPtr> clusters;
         clusterer_->cluster(obstacles_str_, clusters);
 
+        // Phase 3.1: Proximity-based Cluster Merging to handle over-segmented objects
         std::vector<fs_perception::PointCloudPtr> merged_clusters;
         std::vector<bool> merged_flag(clusters.size(), false);
         
-        // Centroidi con aligned_allocator per evitare Segfault (Eigen alignment)
+        // Centroids with aligned_allocator for Eigen SSE compatibility
         std::vector<Eigen::Vector4f, Eigen::aligned_allocator<Eigen::Vector4f>> centroids(clusters.size());
         
-        for(size_t i=0; i<clusters.size(); ++i) {
+        for(size_t i = 0; i < clusters.size(); ++i) {
             pcl::compute3DCentroid(*clusters[i], centroids[i]);
         }
 
-        const float MERGE_DIST_SQ = 0.25f * 0.25f; // 25cm (era 30cm)
+        const float MERGE_DIST_SQ = 0.25f * 0.25f; // 25cm distance for merging clusters
         for (size_t i = 0; i < clusters.size(); ++i) {
             if (merged_flag[i]) continue;
             fs_perception::PointCloudPtr super_cluster(new fs_perception::PointCloud(*clusters[i]));
 
             for (size_t j = i + 1; j < clusters.size(); ++j) {
                 if (merged_flag[j]) continue;
-                float dx = centroids[i][0] -centroids[j][0] ;
-                float dy = centroids[i][1] -centroids[j][1] ;
+                float dx = centroids[i][0] - centroids[j][0];
+                float dy = centroids[i][1] - centroids[j][1];
 
-                if (dx*dx +dy*dy < MERGE_DIST_SQ) {
+                if (dx*dx + dy*dy < MERGE_DIST_SQ) {
                     *super_cluster += *clusters[j];
                     merged_flag[j] = true; 
                 }
@@ -219,7 +243,7 @@ private:
         }
         profiler_->stopTimer("clustering");
 
-        // 4. Stima Candidati & Filtraggio
+        // Phase 4: Candidate Estimation and Duplicate Filtering
         profiler_->startTimer("estimation");
         std::vector<fs_perception::Cone> candidate_cones;
 
@@ -230,8 +254,8 @@ private:
             }
         }
         
-        // Ridotta soglia di duplicazione: in FS i coni possono essere vicini (es. 70-80cm)
-        const float MIN_DIST_SQ = 0.4f * 0.4f; // 40cm (era 80cm)
+        // Duplicate suppression using spatial proximity
+        const float MIN_DIST_SQ = 0.4f * 0.4f; // 40cm duplicate radius
         std::vector<fs_perception::Cone> final_cones;
 
         for (const auto& candidate : candidate_cones) {
@@ -251,10 +275,11 @@ private:
 
         profiler_->stopTimer("estimation");
 
-        // 5. VISUALIZZAZIONE & OUTPUT
+        // Phase 5: Visualization Markers and Detection Output
         visualization_msgs::msg::MarkerArray markers;
         fs_perception::PointCloud cones_cloud_out; 
 
+        // Clear previous frame markers
         visualization_msgs::msg::Marker delete_marker;
         delete_marker.action = visualization_msgs::msg::Marker::DELETEALL;
         delete_marker.header = msg->header;
@@ -274,16 +299,22 @@ private:
 
             m.pose.position.x = cone.x;
             m.pose.position.y = cone.y;
-            m.pose.position.z = cone.z + (cone.height/2.0); 
+            m.pose.position.z = cone.z + (cone.height / 2.0); 
             m.scale.x = 0.2; m.scale.y = 0.2; m.scale.z = cone.height;
             m.color.a = 1.0;
             
-            if (cone.color == fs_perception::ConeColor::BLUE) { m.color.b = 1.0f; m.color.r = 0.0f; m.color.g = 0.0f; }
-            else if (cone.color == fs_perception::ConeColor::YELLOW) { m.color.r = 1.0f; m.color.g = 1.0f; m.color.b = 0.0f; }
-            else { m.color.b = 1.0f; m.color.r = 0.0f; m.color.g = 0.0f; }
+            // Color mapping for visualization
+            if (cone.color == fs_perception::ConeColor::BLUE) { 
+                m.color.b = 1.0f; m.color.r = 0.0f; m.color.g = 0.0f; 
+            } else if (cone.color == fs_perception::ConeColor::YELLOW) { 
+                m.color.r = 1.0f; m.color.g = 1.0f; m.color.b = 0.0f; 
+            } else { 
+                m.color.b = 1.0f; m.color.r = 0.0f; m.color.g = 0.0f; 
+            }
 
             markers.markers.push_back(m);
 
+            // Output cloud formation
             fs_perception::PointT p_out;
             p_out.x = cone.x; p_out.y = cone.y; p_out.z = cone.z;
             p_out.intensity = 10.0f; 
@@ -297,32 +328,37 @@ private:
         cones_msg.header = msg->header;
         pub_cones_->publish(cones_msg);
 
-        // 6. LOGGING PROFILER
+        // Phase 6: Finalize frame profiling
         profiler_->endFrame(final_cones.size());
 
         if (frame_counter_ % 20 == 0) {
-            RCLCPP_INFO(this->get_logger(), "Frame: %d | Frame processato (salvataggio su JSON in corso)", frame_counter_);
+            RCLCPP_INFO(this->get_logger(), "Processed frame: %d", frame_counter_);
         }
     }
 
+    // ROS 2 publishers and subscriptions
     rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr sub_lidar_;
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr pub_markers_;
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_cones_;
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_ground_;
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_no_ground_;
 
-    fs_perception::PointCloudPtr cloud_str_{new fs_perception::PointCloud};
+    // Internal pipeline storage and interfaces
     fs_perception::PointCloudPtr obstacles_str_{new fs_perception::PointCloud};
     fs_perception::PointCloudPtr ground_str_{new fs_perception::PointCloud};
     std::unique_ptr<fs_perception::GroundRemoverInterface> ground_remover_;
     std::unique_ptr<fs_perception::ClustererInterface> clusterer_;
     std::unique_ptr<fs_perception::EstimatorInterface> estimator_;
     
+    // Benchmarking and logging tools
     std::unique_ptr<fs_perception::PerformanceProfiler> profiler_;
     std::string json_file_path_;
     int frame_counter_ = 0;
 };
 
+/**
+ * @brief Entry point for the lidar perception node.
+ */
 int main(int argc, char **argv) {
     rclcpp::init(argc, argv);
     auto node = std::make_shared<LidarPerceptionNode>();

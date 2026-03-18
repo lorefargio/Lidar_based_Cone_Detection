@@ -9,9 +9,11 @@ SlopeBasedGroundRemover::SlopeBasedGroundRemover() : config_(Config()) {}
 SlopeBasedGroundRemover::SlopeBasedGroundRemover(const Config& config) : config_(config) {}
 
 void SlopeBasedGroundRemover::removeGround(const PointCloudConstPtr& cloud_in, PointCloudPtr& cloud_obstacles, PointCloudPtr& cloud_ground) {
-    if (cloud_in->empty()) return;
+    if (cloud_in->empty()) {
+        return;
+    }
 
-    // 1. Organizziamo i punti per settori angolari
+    // Phase 1: Organize points into angular sectors
     std::vector<std::vector<int>> sectors(config_.segments);
     for (size_t i = 0; i < cloud_in->size(); ++i) {
         const auto& pt = cloud_in->points[i];
@@ -24,16 +26,16 @@ void SlopeBasedGroundRemover::removeGround(const PointCloudConstPtr& cloud_in, P
         sectors[s_idx].push_back(i);
     }
 
-    // Riserviamo memoria per performance
+    // Pre-reserve memory for performance
     cloud_obstacles->points.reserve(cloud_in->size());
     cloud_ground->points.reserve(cloud_in->size());
 
-    // 2. Per ogni settore, analizziamo i punti in ordine di distanza radiale
+    // Phase 2: Perform slope-based analysis for each sector independently
     for (int s = 0; s < config_.segments; ++s) {
         auto& sector_indices = sectors[s];
         if (sector_indices.empty()) continue;
 
-        // Ordiniamo i punti del settore per raggio (r = sqrt(x^2 + y^2))
+        // Sort sector points by radial distance for consecutive comparison
         std::sort(sector_indices.begin(), sector_indices.end(), [&](int a, int b) {
             const auto& pt_a = cloud_in->points[a];
             const auto& pt_b = cloud_in->points[b];
@@ -41,46 +43,49 @@ void SlopeBasedGroundRemover::removeGround(const PointCloudConstPtr& cloud_in, P
         });
 
         float last_ground_r = 0.0f;
-        float last_ground_z = config_.sensor_z;
+        float last_ground_z = config_.sensor_z; // Starting ground level from sensor height
 
         for (int idx : sector_indices) {
             const auto& pt = cloud_in->points[idx];
             float current_r = std::sqrt(pt.x * pt.x + pt.y * pt.y);
             
+            // Hard cutoff for points directly underneath or too close to the sensor
             if (current_r < 0.5f) {
                  cloud_ground->push_back(pt);
                  continue;
             }
 
+            // Slope logic: compare relative height (dz) and radial distance (dr)
             float dr = current_r - last_ground_r;
             float dz = std::abs(pt.z - last_ground_z);
 
             bool is_ground = false;
 
-            // Logica pendenza: se la differenza di altezza rispetto alla distanza è piccola
             if (dr > 0.05f) {
+                // Sufficient distance between points; use slope-based classification
                 float slope = dz / dr;
                 if (slope < config_.max_slope && dz < config_.max_z_diff) {
                     is_ground = true;
                 }
             } else {
-                // Se i punti sono troppo vicini radialmente (stesso anello LiDAR o quasi),
-                // controlliamo solo l'altezza assoluta rispetto all'ultimo suolo noto
+                // Points too close radially (same ring); check absolute height diff only
                 if (dz < config_.max_z_diff) {
                     is_ground = true;
                 }
             }
 
-            // Sicurezza vicino al muso dell'auto (hard cutoff)
+            // Safety check for points near the car's body (hard cutoff)
             if (pt.z < (config_.sensor_z + config_.initial_ground_threshold) && current_r < 3.0f) {
                 is_ground = true;
             }
 
             if (is_ground) {
+                // If point is classified as ground, update the last known ground level
                 cloud_ground->push_back(pt);
                 last_ground_r = current_r;
                 last_ground_z = pt.z;
             } else {
+                // Point is classified as an obstacle
                 cloud_obstacles->push_back(pt);
             }
         }
