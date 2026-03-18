@@ -35,12 +35,38 @@ Cone RuleBasedEstimator::estimate(const PointCloudPtr& cluster) {
     // 1. Calcolo Distanza (r) per Soglie Dinamiche
     float r = std::sqrt(cone.x * cone.x + cone.y * cone.y);
 
-    // Calcolo minimo numero di punti attesi in base alla distanza
-    // (Aumenta per punti vicini, diminuisce quadraticamente per punti lontani)
-    int expected_min_points = std::max(2, static_cast<int>(config_.min_points_at_10m * (100.0f / (r * r)))); 
+    // Calcolo minimo numero di punti attesi in base alla distanza (Più realistico del precedente)
+    // Formula: expected = points_at_10m * (10 / r)^1.5 -> Calo meno brusco del r^2
+    int expected_min_points = std::max(3, static_cast<int>(config_.min_points_at_10m * std::pow(10.0f / r, 1.5f))); 
     
-    // Filtro Punti Dinamico
+    // Filtro Punti Dinamico (con limite superiore per i vicini per non essere troppo rigido)
+    int max_expected_at_near = 150; 
+    expected_min_points = std::min(expected_min_points, max_expected_at_near);
+
     if (cluster->size() < static_cast<size_t>(expected_min_points)) {
+        return cone;
+    }
+
+    // --- ANALISI PCA (Shape Classifier) ---
+    pcl::PCA<PointT> pca;
+    pca.setInputCloud(cluster);
+    Eigen::Vector3f eigenvalues = pca.getEigenValues().head<3>();
+    
+    float l1 = eigenvalues[0];
+    float l2 = eigenvalues[1];
+    float l3 = eigenvalues[2];
+    
+    // Normalizziamo la somma degli autovalori (Varianza Totale)
+    float sum_l = l1 + l2 + l3;
+    if (sum_l < 1e-6) return cone;
+    
+    // Calcoliamo Linearity (L), Planarity (P), Scattering (S)
+    float linearity = (l1 - l2) / l1;
+    float planarity = (l2 - l3) / l1;
+    float scattering = l3 / l1;
+
+    // Filtriamo in base alla forma (State-of-the-Art per scartare gambe/muri)
+    if (linearity > config_.max_linearity || planarity > config_.max_planarity || scattering < config_.min_scatter) {
         return cone;
     }
 

@@ -43,6 +43,30 @@ def generate_launch_description():
         description='Minimum points expected for a cone at 10 meters distance'
     )
 
+    pca_max_linearity_arg = DeclareLaunchArgument(
+        'pca_max_linearity',
+        default_value='0.8',
+        description='PCA Max Linearity threshold to reject posts/legs'
+    )
+
+    pca_min_scatter_arg = DeclareLaunchArgument(
+        'pca_min_scatter',
+        default_value='0.05',
+        description='PCA Min Scatter threshold to ensure volumetric shape'
+    )
+
+    use_voxel_filter_arg = DeclareLaunchArgument(
+        'use_voxel_filter',
+        default_value='false',
+        description='Whether to use voxel grid downsampling'
+    )
+
+    voxel_size_arg = DeclareLaunchArgument(
+        'voxel_size',
+        default_value='0.05',
+        description='Leaf size for voxel grid filter (meters)'
+    )
+
     # Our perception node
     perception_node = Node(
         package='fs_lidar_perception',
@@ -54,7 +78,11 @@ def generate_launch_description():
             'ground_remover_type': LaunchConfiguration('ground_remover_type'),
             'estimator_type': LaunchConfiguration('estimator_type'),
             'dynamic_width_decay': LaunchConfiguration('dynamic_width_decay'),
-            'min_points_at_10m': LaunchConfiguration('min_points_at_10m')
+            'min_points_at_10m': LaunchConfiguration('min_points_at_10m'),
+            'pca_max_linearity': LaunchConfiguration('pca_max_linearity'),
+            'pca_min_scatter': LaunchConfiguration('pca_min_scatter'),
+            'use_voxel_filter': LaunchConfiguration('use_voxel_filter'),
+            'voxel_size': LaunchConfiguration('voxel_size')
         }]
     )
 
@@ -88,8 +116,13 @@ def generate_launch_description():
         ground_remover_arg,
         estimator_arg,
         dynamic_width_decay_arg,
-        min_points_at_10m_arg,
-        perception_node,
-        foxglove_node,
-        play_bag
-    ])
+                min_points_at_10m_arg,
+                pca_max_linearity_arg,
+                pca_min_scatter_arg,
+                use_voxel_filter_arg,
+                voxel_size_arg,
+                perception_node,
+                foxglove_node,
+                play_bag
+            ])
+        

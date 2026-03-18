@@ -14,11 +14,11 @@ class BinBasedGroundRemover : public GroundRemoverInterface {
 public:
     struct Config {
         float max_range = 25.0f;
-        float sensor_z = -0.52f;
+        float sensor_z = -0.42f;
         float hard_ground_cutoff = -0.47f; // sensor_z + 0.05
-        float local_threshold = 0.04f;      // 4cm sopra il minimo locale
-        int segments = 100;
-        int bins = 100;
+        float local_threshold = 0.02f;      // 4cm sopra il minimo locale
+        int segments = 500;
+        int bins = 500;
     };
 
     BinBasedGroundRemover();

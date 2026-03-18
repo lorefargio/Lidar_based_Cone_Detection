@@ -34,11 +34,11 @@ find_package(sensor_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
 find_package(pcl_conversions REQUIRED)
 
-# PCL: Cerca componenti specifici se possibile, o REQUIRED generale
-find_package(PCL REQUIRED)
-
 # Eigen: Fondamentale per le trasformazioni matriciali
 find_package(Eigen3 REQUIRED)
+
+# PCL: Cerca componenti specifici se possibile, o REQUIRED generale
+find_package(PCL REQUIRED)
 
 # OpenMP: PCL lo usa internamente. Se presente, migliora drasticamente le performance su multicore.
 find_package(OpenMP)
@@ -66,7 +66,6 @@ target_include_directories(perception_node PUBLIC
   ${PCL_INCLUDE_DIRS}
   ${EIGEN3_INCLUDE_DIR}
 )
-
 # --- 7. DEFINIZIONI PCL ---
 # Aggiunge definizioni necessarie per evitare problemi di allineamento memoria con Eigen/PCL
 target_compile_definitions(perception_node PUBLIC ${PCL_DEFINITIONS})

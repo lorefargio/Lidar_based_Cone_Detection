@@ -12,9 +12,13 @@ public:
         float distance_threshold = 0.05f;
         float radius_min = 0.05f;
         float radius_max = 0.18f; // cone standard radius is ~0.114m
-        float min_inlier_ratio = 0.5f; // At least 50% of points should be inliers
+        float min_inlier_ratio = 0.4f; // Ridotto da 0.5f per gestire coni parzialmente coperti
         float min_height = 0.15f;
         float max_height = 0.35f;
+        
+        // PCA Pre-filtering
+        float max_linearity = 0.9f;
+        float min_scatter = 0.02f;
     };
 
     ModelFittingEstimator();

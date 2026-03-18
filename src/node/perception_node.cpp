@@ -1,17 +1,26 @@
+#include "utils/types.hpp"
+
+#include <pcl/pcl_base.h>
+#include <pcl/impl/pcl_base.hpp>      // <--- IMPORTANTE: include l'implementazione della base
+#include <pcl/filters/voxel_grid.h>
+#include <pcl/filters/impl/voxel_grid.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <visualization_msgs/msg/marker_array.hpp>
 #include <pcl_conversions/pcl_conversions.h>
 #include <pcl/common/centroid.h>
+#include <pcl/common/impl/centroid.hpp>
 #include <chrono>
 #include <memory>
 #include <fstream>
 #include <filesystem>
 
-#include "utils/types.hpp"
+
 #include "filtering/ground_remover_interface.hpp"
 #include "filtering/bin_based_ground_remover.hpp"
 #include "filtering/slope_based_ground_remover.hpp"
+#include "filtering/patchwork_pp_ground_remover.hpp"
+#include "filtering/official_patchwork_pp_ground_remover.hpp"
 #include "clustering/clusterer_interface.hpp"
 #include "clustering/string_clusterer.hpp"
 #include "clustering/euclidean_clusterer.hpp"
@@ -26,6 +35,10 @@
 
 using namespace std::chrono_literals;
 
+namespace pcl {
+  template class PCLBase<fs_perception::PointT>;
+  template class VoxelGrid<fs_perception::PointT>;
+}
 class LidarPerceptionNode : public rclcpp::Node {
 public:
     LidarPerceptionNode() : Node("lidar_perception_node") {
@@ -69,16 +82,25 @@ public:
             RCLCPP_INFO(this->get_logger(), "Ground Removal: Defaulting to SLOPE-BASED");
         }
 
+        this->declare_parameter<bool>("use_voxel_filter", false);
+        this->declare_parameter<double>("voxel_size", 0.05);
+
         this->declare_parameter<std::string>("estimator_type", "rule_based");
         std::string est_type = this->get_parameter("estimator_type").as_string();
 
         this->declare_parameter<double>("dynamic_width_decay", 0.005);
         this->declare_parameter<int>("min_points_at_10m", 10);
+        this->declare_parameter<double>("pca_max_linearity", 0.8);
+        this->declare_parameter<double>("pca_max_planarity", 0.8);
+        this->declare_parameter<double>("pca_min_scatter", 0.05);
 
         if (est_type == "rule_based") {
             fs_perception::RuleBasedEstimator::Config config;
             config.dynamic_width_decay = this->get_parameter("dynamic_width_decay").as_double();
             config.min_points_at_10m = this->get_parameter("min_points_at_10m").as_int();
+            config.max_linearity = this->get_parameter("pca_max_linearity").as_double();
+            config.max_planarity = this->get_parameter("pca_max_planarity").as_double();
+            config.min_scatter = this->get_parameter("pca_min_scatter").as_double();
 
             estimator_ = std::make_unique<fs_perception::RuleBasedEstimator>(config);
             RCLCPP_INFO(this->get_logger(), "Estimator Algorithm: RULE-BASED (Dynamic Thresholds)");
@@ -122,32 +144,35 @@ public:
     }
 
 private:
-    fs_perception::PointCloudPtr cloud_str_{new fs_perception::PointCloud};
-    fs_perception::PointCloudPtr obstacles_str_{new fs_perception::PointCloud};
-    fs_perception::PointCloudPtr ground_str_{new fs_perception::PointCloud};
-    std::unique_ptr<fs_perception::GroundRemoverInterface> ground_remover_;
-    std::unique_ptr<fs_perception::ClustererInterface> clusterer_;
-    std::unique_ptr<fs_perception::EstimatorInterface> estimator_;
-    
-    std::unique_ptr<fs_perception::PerformanceProfiler> profiler_;
-    std::string json_file_path_;
-    int frame_counter_ = 0;
-
     void callback(const sensor_msgs::msg::PointCloud2::SharedPtr msg) {
         frame_counter_++;
         profiler_->startFrame();
 
         // 1. Conversione
-        cloud_str_->clear();
-        pcl::fromROSMsg(*msg, *cloud_str_);
+        fs_perception::PointCloudPtr raw_cloud(new fs_perception::PointCloud);
+        pcl::fromROSMsg(*msg, *raw_cloud);
+        
+        if (raw_cloud->empty()) return;
 
-        // 2. Ground Removal
+        // 2. Ground Removal (Su nuvola a piena risoluzione per massima precisione)
         profiler_->startTimer("ground_removal");
         obstacles_str_->clear();
-        ground_str_->clear() ;
+        ground_str_->clear();
 
-        ground_remover_->removeGround(cloud_str_, obstacles_str_, ground_str_);
+        ground_remover_->removeGround(raw_cloud, obstacles_str_, ground_str_);
         profiler_->stopTimer("ground_removal");
+
+        // 2.1 Voxel Grid Downsampling (Solo sugli ostacoli per velocizzare Clustering ed Estimation)
+        if (this->get_parameter("use_voxel_filter").as_bool()) {
+            double leaf_size = this->get_parameter("voxel_size").as_double();
+            pcl::VoxelGrid<fs_perception::PointT> voxel_grid;
+            voxel_grid.setInputCloud(obstacles_str_);
+            voxel_grid.setLeafSize(leaf_size, leaf_size, leaf_size);
+            
+            fs_perception::PointCloudPtr filtered_obstacles(new fs_perception::PointCloud);
+            voxel_grid.filter(*filtered_obstacles);
+            obstacles_str_ = filtered_obstacles;
+        }
 
         // Debug Output
         sensor_msgs::msg::PointCloud2 ground_msg;
@@ -167,12 +192,15 @@ private:
 
         std::vector<fs_perception::PointCloudPtr> merged_clusters;
         std::vector<bool> merged_flag(clusters.size(), false);
-        std::vector<Eigen::Vector4f> centroids(clusters.size());
+        
+        // Centroidi con aligned_allocator per evitare Segfault (Eigen alignment)
+        std::vector<Eigen::Vector4f, Eigen::aligned_allocator<Eigen::Vector4f>> centroids(clusters.size());
         
         for(size_t i=0; i<clusters.size(); ++i) {
             pcl::compute3DCentroid(*clusters[i], centroids[i]);
         }
 
+        const float MERGE_DIST_SQ = 0.25f * 0.25f; // 25cm (era 30cm)
         for (size_t i = 0; i < clusters.size(); ++i) {
             if (merged_flag[i]) continue;
             fs_perception::PointCloudPtr super_cluster(new fs_perception::PointCloud(*clusters[i]));
@@ -182,7 +210,7 @@ private:
                 float dx = centroids[i][0] -centroids[j][0] ;
                 float dy = centroids[i][1] -centroids[j][1] ;
 
-                if (dx*dx +dy*dy < (0.30f * 0.30f)) {
+                if (dx*dx +dy*dy < MERGE_DIST_SQ) {
                     *super_cluster += *clusters[j];
                     merged_flag[j] = true; 
                 }
@@ -202,7 +230,8 @@ private:
             }
         }
         
-        const float MIN_DIST_SQ = 0.8f * 0.8f;
+        // Ridotta soglia di duplicazione: in FS i coni possono essere vicini (es. 70-80cm)
+        const float MIN_DIST_SQ = 0.4f * 0.4f; // 40cm (era 80cm)
         std::vector<fs_perception::Cone> final_cones;
 
         for (const auto& candidate : candidate_cones) {
@@ -219,6 +248,7 @@ private:
                 final_cones.push_back(candidate);
             }
         }
+
         profiler_->stopTimer("estimation");
 
         // 5. VISUALIZZAZIONE & OUTPUT
@@ -280,6 +310,17 @@ private:
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_cones_;
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_ground_;
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_no_ground_;
+
+    fs_perception::PointCloudPtr cloud_str_{new fs_perception::PointCloud};
+    fs_perception::PointCloudPtr obstacles_str_{new fs_perception::PointCloud};
+    fs_perception::PointCloudPtr ground_str_{new fs_perception::PointCloud};
+    std::unique_ptr<fs_perception::GroundRemoverInterface> ground_remover_;
+    std::unique_ptr<fs_perception::ClustererInterface> clusterer_;
+    std::unique_ptr<fs_perception::EstimatorInterface> estimator_;
+    
+    std::unique_ptr<fs_perception::PerformanceProfiler> profiler_;
+    std::string json_file_path_;
+    int frame_counter_ = 0;
 };
 
 int main(int argc, char **argv) {
