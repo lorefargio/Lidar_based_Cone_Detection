@@ -1,4 +1,4 @@
-#include "../include/string_clusterer.hpp"
+#include "clustering/string_clusterer.hpp"
 #include <cmath>
 
 namespace fs_perception {

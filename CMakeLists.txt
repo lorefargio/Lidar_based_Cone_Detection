@@ -45,10 +45,18 @@ find_package(OpenMP)
 
 # --- 5. DEFINIZIONE TARGET ---
 add_executable(perception_node
-  src/perception_node.cpp
-  src/ground_remover.cpp
-  src/string_clusterer.cpp
-  src/cone_estimator.cpp
+  src/node/perception_node.cpp
+  src/filtering/bin_based_ground_remover.cpp
+  src/filtering/slope_based_ground_remover.cpp
+  src/clustering/string_clusterer.cpp
+  src/clustering/euclidean_clusterer.cpp
+  src/clustering/grid_clusterer.cpp
+  src/clustering/dbscan_clusterer.cpp
+  src/clustering/adaptive_dbscan_clusterer.cpp
+  src/clustering/voxel_connected_components.cpp
+  src/estimation/rule_based_estimator.cpp
+  src/estimation/model_fitting_estimator.cpp
+  src/utils/performance_profiler.cpp
 )
 
 # --- 6. INCLUDE DIRECTORIES ---
@@ -102,6 +110,10 @@ install(TARGETS perception_node
 
 install(DIRECTORY include/
   DESTINATION include/${PROJECT_NAME}
+)
+
+install(DIRECTORY launch/
+  DESTINATION share/${PROJECT_NAME}/launch
 )
 
 ament_package()

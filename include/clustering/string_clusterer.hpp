@@ -1,12 +1,12 @@
 #pragma once
 
-// NOTA: Include diretto senza cartella
-#include "types.hpp"
+#include "utils/types.hpp"
+#include "clustering/clusterer_interface.hpp"
 #include <vector>
 
 namespace fs_perception {
 
-class StringClusterer {
+class StringClusterer : public ClustererInterface {
 public:
     /**
      * @brief Raggruppa i punti ostacolo in oggetti distinti.
@@ -15,7 +15,7 @@ public:
      * @param clusters Output: Vettore di nuvole, dove ogni nuvola è un cluster (cono candidato)
      */
     void cluster(const PointCloudPtr& cloud, 
-                 std::vector<PointCloudPtr>& clusters);
+                 std::vector<PointCloudPtr>& clusters) override;
 };
 
 } // namespace fs_perception
