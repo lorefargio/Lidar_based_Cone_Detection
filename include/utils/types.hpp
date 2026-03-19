@@ -58,8 +58,11 @@ namespace fs_perception {
      */
     struct Cone {
         float x, y, z;        ///< 3D position of the cone in the sensor frame (meters).
+        float range;          ///< Radial distance from the sensor (meters).
+        float bearing;        ///< Angular position in the XY plane (radians).
         ConeColor color;      ///< Estimated color category of the cone.
         float confidence;     ///< Confidence score of the detection (0.0 to 1.0).
         float height;         ///< Estimated height of the cone (meters), used for debug.
+        PointCloudPtr cloud;  ///< Original points belonging to this cone cluster.
     };
 }

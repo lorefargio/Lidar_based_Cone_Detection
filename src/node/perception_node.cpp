@@ -13,6 +13,8 @@
 #include <chrono>
 #include <memory>
 #include <fstream>
+#include <iomanip>
+#include <sstream>
 #include <filesystem>
 
 #include "filtering/ground_remover_interface.hpp"
@@ -144,6 +146,7 @@ public:
 
         pub_markers_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("/perception/cones_vis", 10);
         pub_cones_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/perception/cones", 10);
+        pub_cone_points_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/perception/cone_points", 10);
         pub_ground_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/perception/ground_debug", 10);
         pub_no_ground_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/perception/no_ground", 10);
 
@@ -278,6 +281,7 @@ private:
         // Phase 5: Visualization Markers and Detection Output
         visualization_msgs::msg::MarkerArray markers;
         fs_perception::PointCloud cones_cloud_out; 
+        fs_perception::PointCloud cone_points_out;
 
         // Clear previous frame markers
         visualization_msgs::msg::Marker delete_marker;
@@ -287,12 +291,21 @@ private:
         delete_marker.id = 0;
         markers.markers.push_back(delete_marker);
 
+        // Clear distance labels as well
+        visualization_msgs::msg::Marker delete_labels;
+        delete_labels.action = visualization_msgs::msg::Marker::DELETEALL;
+        delete_labels.header = msg->header;
+        delete_labels.ns = "distance_labels";
+        delete_labels.id = 0;
+        markers.markers.push_back(delete_labels);
+
         int id_counter = 1;
         for (const auto& cone : final_cones) {
+            // 1. Geometry Marker (Cylinder)
             visualization_msgs::msg::Marker m;
             m.header = msg->header;
             m.ns = "cones";
-            m.id = id_counter++;
+            m.id = id_counter;
             m.type = visualization_msgs::msg::Marker::CYLINDER;
             m.action = visualization_msgs::msg::Marker::ADD;
             m.lifetime = rclcpp::Duration::from_seconds(0.2); 
@@ -314,11 +327,35 @@ private:
 
             markers.markers.push_back(m);
 
-            // Output cloud formation
+            // 2. Distance Label Marker (Text)
+            visualization_msgs::msg::Marker t;
+            t.header = msg->header;
+            t.ns = "distance_labels";
+            t.id = id_counter++;
+            t.type = visualization_msgs::msg::Marker::TEXT_VIEW_FACING;
+            t.action = visualization_msgs::msg::Marker::ADD;
+            t.lifetime = rclcpp::Duration::from_seconds(0.2);
+            t.pose.position.x = cone.x;
+            t.pose.position.y = cone.y;
+            t.pose.position.z = cone.z + cone.height + 0.2;
+            t.scale.z = 0.15; // text height
+            t.color.a = 1.0; t.color.r = 1.0; t.color.g = 1.0; t.color.b = 1.0;
+            
+            std::stringstream ss;
+            ss << std::fixed << std::setprecision(2) << cone.range << "m";
+            t.text = ss.str();
+            markers.markers.push_back(t);
+
+            // 3. Centroid Output (For Range/Bearing information)
             fs_perception::PointT p_out;
             p_out.x = cone.x; p_out.y = cone.y; p_out.z = cone.z;
-            p_out.intensity = 10.0f; 
+            p_out.intensity = cone.range; // Using intensity as a way to pass range in default cloud
             cones_cloud_out.push_back(p_out);
+
+            // 4. Full Points Output (For Bounding Box check)
+            if (cone.cloud) {
+                cone_points_out += *cone.cloud;
+            }
         }
 
         pub_markers_->publish(markers);
@@ -327,6 +364,11 @@ private:
         pcl::toROSMsg(cones_cloud_out, cones_msg);
         cones_msg.header = msg->header;
         pub_cones_->publish(cones_msg);
+
+        sensor_msgs::msg::PointCloud2 cone_points_msg;
+        pcl::toROSMsg(cone_points_out, cone_points_msg);
+        cone_points_msg.header = msg->header;
+        pub_cone_points_->publish(cone_points_msg);
 
         // Phase 6: Finalize frame profiling
         profiler_->endFrame(final_cones.size());
@@ -340,6 +382,7 @@ private:
     rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr sub_lidar_;
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr pub_markers_;
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_cones_;
+    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_cone_points_;
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_ground_;
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_no_ground_;
 

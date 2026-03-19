@@ -34,8 +34,11 @@ Cone RuleBasedEstimator::estimate(const PointCloudPtr& cluster) {
     cone.x = centroid[0];
     cone.y = centroid[1];
     
-    // Radial distance from sensor for dynamic thresholding
+    // Radial distance and bearing calculation
     float r = std::sqrt(cone.x * cone.x + cone.y * cone.y);
+    cone.range = r;
+    cone.bearing = std::atan2(cone.y, cone.x);
+    cone.cloud = cluster;
 
     // Dynamic point count threshold (Inversely proportional to distance square)
     // Capped at 150 points for very close ranges

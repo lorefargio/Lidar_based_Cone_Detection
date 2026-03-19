@@ -52,6 +52,9 @@ Cone ModelFittingEstimator::estimate(const PointCloudPtr& cluster) {
     pcl::compute3DCentroid(*cluster, centroid);
     cone.x = centroid[0];
     cone.y = centroid[1];
+    cone.range = std::sqrt(cone.x * cone.x + cone.y * cone.y);
+    cone.bearing = std::atan2(cone.y, cone.x);
+    cone.cloud = cluster;
 
     // Phase 3: Surface Normal Estimation for Cylinder Fitting
     pcl::NormalEstimation<PointT, pcl::Normal> ne;

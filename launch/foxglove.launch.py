@@ -51,7 +51,7 @@ def generate_launch_description():
 
     pca_min_scatter_arg = DeclareLaunchArgument(
         'pca_min_scatter',
-        default_value='0.05',
+        default_value='0.005',
         description='PCA Min Scatter threshold to ensure volumetric shape'
     )
 
