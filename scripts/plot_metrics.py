@@ -9,7 +9,8 @@ import numpy as np
 # Configure Seaborn for professional-grade charts
 sns.set_theme(style="whitegrid", context="paper", font_scale=1.2)
 
-LOG_DIR = "/home/lore/lidar_ws/log_profiler"
+# Use log_profiler in the current directory as default
+LOG_DIR = os.getenv("PERCEPTION_LOG_DIR", "log_profiler")
 FIGURES_DIR = os.path.join(LOG_DIR, "figures")
 
 def load_data():

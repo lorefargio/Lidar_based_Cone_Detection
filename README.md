@@ -1,47 +1,55 @@
-# Lidar Based cone detection
+# Formula Student LiDAR Perception 
 
-Questo pacchetto ROS 2 implementa la pipeline di percezione LiDAR per veicoli autonomi di Formula Student. L'obiettivo principale è identificare in modo rapido e accurato i coni che delimitano il tracciato, elaborando nuvole di punti 3D ad alta frequenza (es. 10Hz - 20Hz).
-
-Il progetto è strutturato per garantire **massima modularità** e fornire un **framework di valutazione delle performance**, fondamentale per l'ottimizzazione dell'esecuzione in tempo reale su hardware embedded.
+Questo pacchetto implementa una pipeline di percezione LiDAR ad alte prestazioni per veicoli Formula Student, ottimizzata per l'identificazione rapida di coni in scenari dinamici.
 
 ---
 
 ## 🏗 Architettura della Pipeline
 
-La pipeline è suddivisa in tre stadi principali intercambiabili a runtime tramite parametri ROS:
+La pipeline è suddivisa in quattro stadi sequenziali e modulari:
 
-1.  [**Filtering (Ground Removal)**](docs/filtering.md): Separazione del suolo dagli ostacoli (Bin-based, Slope-based, Patchwork++).
-2.  [**Clustering (Object Grouping)**](docs/clustering.md): Raggruppamento dei punti ostacolo in oggetti (Grid, Euclidean, String, DBSCAN, Voxel).
-3.  [**Estimation (Cone Classification)**](docs/estimation.md): Validazione dei cluster e stima della posizione XYZ dei coni (Rule-based, PCA, RANSAC).
-4.  [**Fusion Integration**](docs/fusion_integration.md): Supporto avanzato per la fusione Camera-LiDAR (Range/Bearing e Full Point Cloud).
-
----
-
-## ⏱ Benchmarking e Performance Profiling
-
-Il progetto include un sistema integrato per misurare e confrontare le performance di ogni fase in termini di latenza, jitter e stabilità.
-
-*   [**Framework di Testing e Benchmarking**](docs/benchmarking.md): Dettagli sull'analisi statistica (P95, P99) e sugli script di automazione.
+1.  **[LiDAR Deskewing](docs/deskewing.md):** Correzione della distorsione temporale dei punti tramite interpolazione Slerp (400Hz IMU) e compensazione del braccio di leva (Lever Arm).
+2.  **[Filtering (Ground Removal)](docs/filtering.md):** Separazione del suolo dagli ostacoli (Bin-based, Slope-based).
+3.  **[Clustering (Object Grouping)](docs/clustering.md):** Raggruppamento dei punti in oggetti candidati (Grid, Euclidean, DBSCAN, Voxel).
+4.  **[Estimation (Cone Classification)](docs/estimation.md):** Validazione geometrica (Rule-based, PCA, RANSAC) e calcolo della posizione XYZ.
 
 ---
 
-## 🚀 Come Eseguire il Sistema
+## 🏎 Setup Hardware: Bi-Mensola (ZED2 + Hesai)
 
-La pipeline può essere configurata interamente tramite file di launch. Puoi lanciare il nodo e testare combinazioni di algoritmi al volo, prima è necessario aver installato foxglove e avere un abiente che supporta ROS2, nello specifico il codice è stato testato su unn dispositivo con Ubunutu 22.04 e ROS2 Humble:
+Il sistema è ottimizzato per un setup a supporto rigido ancorato al monoscocca in fibra di carbonio. 
+*   **Sincronizzazione:** Pre-processing degli orientamenti IMU direttamente nel frame LiDAR per minimizzare il carico CPU (Manual Config).
+*   **Compensazione Traslazionale:** Gestione dell'offset fisico tra la mensola della camera e quella del LiDAR per correggere le accelerazioni indotte dal beccheggio/rollio.
 
+![Setup di testing e raccolta dati](/docs/testing_setup.jpg)
+
+
+---
+
+## 🚀 Guida Rapida all'Esecuzione
+
+### Esecuzione Standard 
 ```bash
-# Esempio: Avvio con Patchwork++ per il suolo e Clustering Voxel
 ros2 launch fs_lidar_perception foxglove.launch.py \
-    ground_remover_type:=patchwork \
-    clustering_algorithm:=voxel \
-    estimator_type:=rule_based
+    use_deskewing:=true \
+    imu_topic:=/zed/zed_node/imu/data \
+    clustering_algorithm:=voxel
 ```
 
-### Parametri Supportati:
-- `ground_remover_type`: `bin_based`, `slope_based`, `patchwork`, `patchwork_official`
-- `clustering_algorithm`: `grid`, `euclidean`, `string`, `dbscan`, `hdbscan`, `voxel`
-- `estimator_type`: `rule_based`, `ransac`
+### Configurazione Parametri
+Tutte le impostazioni del sistema (soglie, algoritmi, calibrazioni) sono documentate qui:
+👉 **[Guida ai Parametri di Launch](docs/parameters.md)**
+
+---
+
+## ⏱ Benchmarking e Performance
+
+Il progetto include un profiler integrato che salva i dati di latenza in `log_profiler/`.
+*   **Target Real-Time:** 20Hz (50ms budget totale).
+*   **Overhead Deskewing:** < 2ms (grazie all'ottimizzazione SIMD di Eigen e al pre-processing IMU).
+
 ---
 
 ## 🛠 Prossimi Sviluppi
-1.  **Debugging & Finetuning:** Affinamento continuo dei parametri per i vari algoritmi, debugging dell'estimazione tramite ransac.
+*   **Calibrazione Fine:** Inserimento delle misure CAD precise per il braccio di leva IMU-LiDAR.
+*   **Tuning:** Ottimizzazione delle soglie dei vari algoritmi.

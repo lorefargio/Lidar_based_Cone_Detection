@@ -48,14 +48,4 @@ Versione 3D del Grid Clusterer. Crea voxel cubici e cerca componenti connesse tr
 | `min_pts` | Punti minimi per formare un cluster. | Impedisce la creazione di cluster da falsi ritorni o polvere. |
 | `min_cluster_size`| Punti minimi totali per un oggetto candidato. | Un cono a 15m può avere solo 5 punti, a 2m ne ha 100. Parametro critico per il richiamo (Recall). |
 
----
 
-## 3. Confronto Tecnico
-
-| Algoritmo | Velocità | Separazione Oggetti | Casi d'Uso |
-| :--- | :--- | :--- | :--- |
-| **Grid 2D** | ⭐⭐⭐⭐ | ⭐ | Molto veloce, ma fonde oggetti se vicini sul piano. |
-| **Euclidean** | ⭐⭐ | ⭐⭐⭐⭐ | Standard, molto affidabile per oggetti distinti. |
-| **String** | ⭐⭐⭐⭐⭐ | ⭐⭐ | Massimo FPS (40-60Hz), necessita di ordine nel driver. |
-| **DBSCAN** | ⭐⭐⭐ | ⭐⭐⭐ | Migliore rimozione del rumore (outliers). |
-| **Voxel 3D** | ⭐⭐⭐⭐ | ⭐⭐⭐ | Ottimo compromesso velocità/precisione 3D. |

@@ -31,6 +31,7 @@
 #include "estimation/rule_based_estimator.hpp"
 #include "estimation/model_fitting_estimator.hpp"
 #include "utils/performance_profiler.hpp"
+#include "utils/deskewer.hpp"
 
 using namespace std::chrono_literals;
 
@@ -54,6 +55,16 @@ public:
      * Initializes all parameters, publishers, and subscribers.
      */
     LidarPerceptionNode() : Node("lidar_perception_node") {
+        // --- Mandatory Bag Parameter Check ---
+        this->declare_parameter<std::string>("bag_path", "");
+        std::string bag_path = this->get_parameter("bag_path").as_string();
+        if (bag_path.empty()) {
+            RCLCPP_ERROR(this->get_logger(), "FATAL: 'bag_path' parameter is missing! The node cannot start without a valid bag.");
+            rclcpp::shutdown();
+            exit(EXIT_FAILURE);
+        }
+        RCLCPP_INFO(this->get_logger(), "Processing bag: %s", bag_path.c_str());
+
         // --- Algorithm selection parameters ---
         this->declare_parameter<std::string>("clustering_algorithm", "grid");
         std::string algo = this->get_parameter("clustering_algorithm").as_string();
@@ -98,6 +109,16 @@ public:
         this->declare_parameter<bool>("use_voxel_filter", false);
         this->declare_parameter<double>("voxel_size", 0.05);
 
+        // Deskewing parameters
+        this->declare_parameter<bool>("use_deskewing", true);
+        this->declare_parameter<std::string>("imu_topic", "/zed/zed_node/imu/data");
+
+        if (this->get_parameter("use_deskewing").as_bool()) {
+            fs_perception::Deskewer::Config deskewer_cfg;
+            deskewer_ = std::make_unique<fs_perception::Deskewer>(deskewer_cfg);
+            RCLCPP_INFO(this->get_logger(), "Lidar Deskewing ENABLED.");
+        }
+
         // Factory for estimation algorithms
         this->declare_parameter<std::string>("estimator_type", "rule_based");
         std::string est_type = this->get_parameter("estimator_type").as_string();
@@ -128,8 +149,17 @@ public:
         }
 
         // Benchmarking Setup
-        std::string log_dir = "/home/lore/lidar_ws/log_profiler/";
-        std::filesystem::create_directories(log_dir); 
+        this->declare_parameter<std::string>("log_dir", "log_profiler/");
+        std::string log_dir = this->get_parameter("log_dir").as_string();
+        
+        // Ensure log directory ends with a slash
+        if (!log_dir.empty() && log_dir.back() != '/') log_dir += '/';
+        
+        try {
+            std::filesystem::create_directories(log_dir); 
+        } catch (const std::exception& e) {
+            RCLCPP_ERROR(this->get_logger(), "Failed to create log directory %s: %s", log_dir.c_str(), e.what());
+        }
         
         profiler_ = std::make_unique<fs_perception::PerformanceProfiler>(algo);
         json_file_path_ = log_dir + "profiler_" + algo + ".json";
@@ -143,6 +173,16 @@ public:
         sub_lidar_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
             "/lidar_points", qos, 
             std::bind(&LidarPerceptionNode::callback, this, std::placeholders::_1));
+
+        if (this->get_parameter("use_deskewing").as_bool()) {
+            std::string imu_topic = this->get_parameter("imu_topic").as_string();
+            sub_imu_ = this->create_subscription<sensor_msgs::msg::Imu>(
+                imu_topic, 100, 
+                [this](const sensor_msgs::msg::Imu::SharedPtr msg) {
+                    if (deskewer_) deskewer_->addImuMessage(msg);
+                });
+            RCLCPP_INFO(this->get_logger(), "Subscribed to IMU: %s", imu_topic.c_str());
+        }
 
         pub_markers_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("/perception/cones_vis", 10);
         pub_cones_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/perception/cones", 10);
@@ -171,33 +211,63 @@ private:
      * @param msg Incoming PointCloud2 message from the LiDAR sensor.
      */
     void callback(const sensor_msgs::msg::PointCloud2::SharedPtr msg) {
+        if (!msg) return;
+
         frame_counter_++;
-        profiler_->startFrame();
+        if (profiler_) profiler_->startFrame();
 
         // Phase 1: Point cloud conversion from ROS to PCL
         fs_perception::PointCloudPtr raw_cloud(new fs_perception::PointCloud);
-        pcl::fromROSMsg(*msg, *raw_cloud);
+        try {
+            pcl::fromROSMsg(*msg, *raw_cloud);
+        } catch (const std::exception& e) {
+            RCLCPP_ERROR(this->get_logger(), "Conversion from ROS to PCL failed: %s", e.what());
+            return;
+        }
         
         if (raw_cloud->empty()) return;
 
+        // Phase 1.1: Lidar Deskewing
+        if (this->get_parameter("use_deskewing").as_bool() && deskewer_) {
+            if (profiler_) profiler_->startTimer("deskewing");
+            if (!deskewer_->deskew(raw_cloud)) {
+                RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000, 
+                    "Deskewing failed (possibly waiting for IMU data).");
+            }
+            if (profiler_) profiler_->stopTimer("deskewing");
+        }
+
         // Phase 2: Ground Removal (Run on full resolution for maximum precision)
-        profiler_->startTimer("ground_removal");
+        if (!ground_remover_) {
+            RCLCPP_ERROR_ONCE(this->get_logger(), "Ground remover not initialized!");
+            return;
+        }
+
+        if (profiler_) profiler_->startTimer("ground_removal");
         obstacles_str_->clear();
         ground_str_->clear();
 
         ground_remover_->removeGround(raw_cloud, obstacles_str_, ground_str_);
-        profiler_->stopTimer("ground_removal");
+        if (profiler_) profiler_->stopTimer("ground_removal");
 
         // Phase 2.1: Optional Voxel Grid Downsampling to speed up subsequent stages
         if (this->get_parameter("use_voxel_filter").as_bool()) {
             double leaf_size = this->get_parameter("voxel_size").as_double();
+            
+            // Safety Check: Leaf size cannot be smaller than 0.01m to avoid memory explosion
+            if (leaf_size < 0.01) leaf_size = 0.01;
+
             pcl::VoxelGrid<fs_perception::PointT> voxel_grid;
             voxel_grid.setInputCloud(obstacles_str_);
             voxel_grid.setLeafSize(leaf_size, leaf_size, leaf_size);
             
             fs_perception::PointCloudPtr filtered_obstacles(new fs_perception::PointCloud);
-            voxel_grid.filter(*filtered_obstacles);
-            obstacles_str_ = filtered_obstacles;
+            try {
+                voxel_grid.filter(*filtered_obstacles);
+                obstacles_str_ = filtered_obstacles;
+            } catch (const std::exception& e) {
+                RCLCPP_ERROR(this->get_logger(), "VoxelGrid failed: %s", e.what());
+            }
         }
 
         // Publish debug ground clouds
@@ -212,7 +282,12 @@ private:
         pub_no_ground_->publish(no_ground_msg);
 
         // Phase 3: Object Clustering
-        profiler_->startTimer("clustering");
+        if (!clusterer_) {
+            RCLCPP_ERROR_ONCE(this->get_logger(), "Clusterer not initialized!");
+            return;
+        }
+
+        if (profiler_) profiler_->startTimer("clustering");
         std::vector<fs_perception::PointCloudPtr> clusters;
         clusterer_->cluster(obstacles_str_, clusters);
 
@@ -244,10 +319,15 @@ private:
             }
             merged_clusters.push_back(super_cluster);
         }
-        profiler_->stopTimer("clustering");
+        if (profiler_) profiler_->stopTimer("clustering");
 
         // Phase 4: Candidate Estimation and Duplicate Filtering
-        profiler_->startTimer("estimation");
+        if (!estimator_) {
+            RCLCPP_ERROR_ONCE(this->get_logger(), "Estimator not initialized!");
+            return;
+        }
+
+        if (profiler_) profiler_->startTimer("estimation");
         std::vector<fs_perception::Cone> candidate_cones;
 
         for (const auto& c : merged_clusters) {
@@ -276,7 +356,7 @@ private:
             }
         }
 
-        profiler_->stopTimer("estimation");
+        if (profiler_) profiler_->stopTimer("estimation");
 
         // Phase 5: Visualization Markers and Detection Output
         visualization_msgs::msg::MarkerArray markers;
@@ -371,15 +451,24 @@ private:
         pub_cone_points_->publish(cone_points_msg);
 
         // Phase 6: Finalize frame profiling
-        profiler_->endFrame(final_cones.size());
+        if (profiler_) {
+            profiler_->endFrame(final_cones.size());
 
-        if (frame_counter_ % 20 == 0) {
-            RCLCPP_INFO(this->get_logger(), "Processed frame: %d", frame_counter_);
+            if (frame_counter_ % 50 == 0) {
+                auto total_ms = profiler_->getLastFrameTotalMs();
+                RCLCPP_INFO(this->get_logger(), "Frame: %d | Total Latency: %.2f ms | Cones: %zu", 
+                    frame_counter_, total_ms, final_cones.size());
+                
+                if (total_ms > 50.0) {
+                    RCLCPP_WARN(this->get_logger(), "PERFORMANCE ALERT: Latency (%.2f ms) exceeds 20Hz budget!", total_ms);
+                }
+            }
         }
     }
 
     // ROS 2 publishers and subscriptions
     rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr sub_lidar_;
+    rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr sub_imu_;
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr pub_markers_;
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_cones_;
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_cone_points_;
@@ -392,6 +481,7 @@ private:
     std::unique_ptr<fs_perception::GroundRemoverInterface> ground_remover_;
     std::unique_ptr<fs_perception::ClustererInterface> clusterer_;
     std::unique_ptr<fs_perception::EstimatorInterface> estimator_;
+    std::unique_ptr<fs_perception::Deskewer> deskewer_;
     
     // Benchmarking and logging tools
     std::unique_ptr<fs_perception::PerformanceProfiler> profiler_;

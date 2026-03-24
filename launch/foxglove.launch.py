@@ -6,11 +6,10 @@ from launch.conditions import IfCondition
 from launch_ros.actions import Node
 
 def generate_launch_description():
-    # Argument for the rosbag file path
+    # Argument for the rosbag file path (MANDATORY)
     bag_arg = DeclareLaunchArgument(
         'bag',
-        default_value='',
-        description='Path to the rosbag to play. If empty, the bag will not be played.'
+        description='Path to the rosbag to play. This parameter is MANDATORY; the node will fail if not provided.'
     )
 
     clusterer_arg = DeclareLaunchArgument(
@@ -67,6 +66,18 @@ def generate_launch_description():
         description='Leaf size for voxel grid filter (meters)'
     )
 
+    use_deskewing_arg = DeclareLaunchArgument(
+        'use_deskewing',
+        default_value='true',
+        description='Whether to enable LiDAR deskewing using IMU data'
+    )
+
+    imu_topic_arg = DeclareLaunchArgument(
+        'imu_topic',
+        default_value='/zed/zed_node/imu/data',
+        description='Topic name for the IMU data'
+    )
+
     # Our perception node
     perception_node = Node(
         package='fs_lidar_perception',
@@ -74,6 +85,7 @@ def generate_launch_description():
         name='lidar_perception_node',
         output='screen',
         parameters=[{
+            'bag_path': LaunchConfiguration('bag'),
             'clustering_algorithm': LaunchConfiguration('clustering_algorithm'),
             'ground_remover_type': LaunchConfiguration('ground_remover_type'),
             'estimator_type': LaunchConfiguration('estimator_type'),
@@ -82,7 +94,9 @@ def generate_launch_description():
             'pca_max_linearity': LaunchConfiguration('pca_max_linearity'),
             'pca_min_scatter': LaunchConfiguration('pca_min_scatter'),
             'use_voxel_filter': LaunchConfiguration('use_voxel_filter'),
-            'voxel_size': LaunchConfiguration('voxel_size')
+            'voxel_size': LaunchConfiguration('voxel_size'),
+            'use_deskewing': LaunchConfiguration('use_deskewing'),
+            'imu_topic': LaunchConfiguration('imu_topic')
         }]
     )
 
@@ -121,6 +135,8 @@ def generate_launch_description():
                 pca_min_scatter_arg,
                 use_voxel_filter_arg,
                 voxel_size_arg,
+                use_deskewing_arg,
+                imu_topic_arg,
                 perception_node,
                 foxglove_node,
                 play_bag

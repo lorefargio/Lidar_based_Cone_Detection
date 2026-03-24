@@ -32,6 +32,7 @@ find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
 find_package(pcl_conversions REQUIRED)
+find_package(pcl_ros REQUIRED)
 
 # Eigen: Required for matrix transformations and linear algebra
 find_package(Eigen3 REQUIRED)
@@ -56,6 +57,7 @@ add_executable(perception_node
   src/estimation/rule_based_estimator.cpp
   src/estimation/model_fitting_estimator.cpp
   src/utils/performance_profiler.cpp
+  src/utils/deskewer.cpp
 )
 
 # --- 6. INCLUDE DIRECTORIES ---
@@ -77,6 +79,7 @@ ament_target_dependencies(perception_node
   sensor_msgs
   visualization_msgs
   pcl_conversions
+  pcl_ros
 )
 
 # External Library Linking

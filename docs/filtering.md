@@ -4,7 +4,7 @@ La fase di filtering è il primo stadio della nostra pipeline di percezione. Il 
 
 ## 1. Algoritmi Implementati
 
-Il progetto utilizza un'architettura modulare (`GroundRemoverInterface`) che permette di scegliere tra tre algoritmi principali:
+Il progetto utilizza un'architettura modulare (`GroundRemoverInterface`) che permette di scegliere tra due algoritmi principali:
 
 ### 1.1 Bin-Based Ground Remover (Classico)
 Divide la nuvola in una griglia polare (settori angolari e bin radiali). Per ogni bin, identifica il punto con l'altezza minima ($Z_{min}$) e considera terreno tutti i punti nel bin che non superano una soglia fissa rispetto a $Z_{min}$.
@@ -30,8 +30,6 @@ Tutti i parametri sono configurabili tramite file di launch:
 | `sensor_z` | Altezza del LiDAR dal suolo (default: -0.52m). | Se errato, l'intera pipeline fallisce ignorando o tagliando i coni. |
 | `max_slope` | (Slope-based) Pendenza massima del suolo. | Aumentarlo permette di rilevare terreni più ripidi, ma rischia di includere basi di oggetti. |
 | `local_threshold` | (Bin-based) Altezza minima sopra il punto più basso. | Troppo alta: si perdono piccoli ostacoli. Troppo bassa: la polvere o il rumore diventano ostacoli. |
-| `elevation_threshold`| (Patchwork++) Distanza massima dal piano locale. | Definisce la tolleranza del piano fittato per il suolo. |
-| `flat_threshold` | (Patchwork++) Quanto deve essere "verticale" la normale. | Impedisce di fittare piani su superfici verticali (muri) scambiandoli per suolo. |
 
 ---
 
@@ -39,7 +37,5 @@ Tutti i parametri sono configurabili tramite file di launch:
 
 | Algoritmo | Velocità | Robustezza | Casi d'Uso |
 | :--- | :--- | :--- | :--- |
-| **Bin-Based** | ⭐⭐⭐ | ⭐ | Test rapidi, terreni perfettamente piatti. |
-| **Slope-Based**| ⭐⭐ | ⭐⭐ | Setup standard, necessità di preservare basi dei coni. |
-| **Patchwork++**| ⭐⭐⭐ | ⭐⭐⭐ | Competizioni, precisione bilanciata. |
-| **Patchwork++ Official** | ⭐⭐⭐ | ⭐⭐⭐⭐ | Competizioni, terreni irregolari, massima precisione. |
+| **Bin-Based** | Test rapidi, terreni perfettamente piatti. |
+| **Slope-Based**| Setup standard, necessità di preservare basi dei coni. |

@@ -66,6 +66,13 @@ public:
     void stopTimer(const std::string& phase);
 
     /**
+     * @brief Gets the total latency of the last processed frame (ms).
+     */
+    double getLastFrameTotalMs() const {
+        return frames_.empty() ? 0.0 : frames_.back().total_ms;
+    }
+
+    /**
      * @brief Serializes all collected frame data to a JSON file.
      * @param filepath Full system path where the JSON file will be saved.
      */

@@ -2,7 +2,7 @@
 
 # --- Configuration ---
 ROSBAG_PATH=$1
-RESULTS_DIR="${HOME}/lidar_ws/log_profiler"
+RESULTS_DIR="${PERCEPTION_LOG_DIR:-log_profiler}"
 ALGORITHMS=("grid" "euclidean" "string" "dbscan" "hdbscan" "voxel")
 NODE_NAME="perception_node"
 
