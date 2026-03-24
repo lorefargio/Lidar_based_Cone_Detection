@@ -9,20 +9,17 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
 endif()
 
 # --- 2. C++ STANDARD ---
-# C++17 is recommended for ROS 2 (Galactic/Humble/Jazzy) and enables better optimizations.
-set(CMAKE_CXX_STANDARD 17)
+# C++20 is required for Patchwork++ integration.
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # --- 3. COMPILER OPTIMIZATIONS ---
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
   add_compile_options(
     -Wall -Wextra -Wpedantic
-    -O3                 # Maximum optimization level
-    -march=native       # Enable CPU-specific instructions (AVX, NEON)
-    -mtune=native       # Optimize for the host CPU
-    -ffast-math         # Speed up floating point operations
-    -DNDEBUG            # Disable assertions for production performance
-    -fno-plt            # Optimize shared library calls
+    -O3
+    -march=native   # Manteniamo questo, MA dobbiamo usarlo ovunque
+    -DNDEBUG
   )
 endif()
 
@@ -33,6 +30,7 @@ find_package(sensor_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
 find_package(pcl_conversions REQUIRED)
 find_package(pcl_ros REQUIRED)
+find_package(patchworkpp REQUIRED)
 
 # Eigen: Required for matrix transformations and linear algebra
 find_package(Eigen3 REQUIRED)
@@ -48,6 +46,7 @@ add_executable(perception_node
   src/node/perception_node.cpp
   src/filtering/bin_based_ground_remover.cpp
   src/filtering/slope_based_ground_remover.cpp
+  src/filtering/patchworkpp_ground_remover.cpp
   src/clustering/string_clusterer.cpp
   src/clustering/euclidean_clusterer.cpp
   src/clustering/grid_clusterer.cpp
@@ -80,12 +79,14 @@ ament_target_dependencies(perception_node
   visualization_msgs
   pcl_conversions
   pcl_ros
+  patchworkpp
 )
 
 # External Library Linking
 target_link_libraries(perception_node
   ${PCL_LIBRARIES}
   Eigen3::Eigen
+  patchworkpp::ground_seg_cores
 )
 
 # Enable OpenMP if found
@@ -95,14 +96,14 @@ endif()
 
 # --- 9. INTERPROCEDURAL OPTIMIZATION (IPO/LTO) ---
 # Enables cross-file inlining and advanced linker optimizations.
-include(CheckIPOSupported)
-check_ipo_supported(RESULT result OUTPUT output)
-if(result)
-  set_property(TARGET perception_node PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
-  message(STATUS "IPO/LTO enabled for perception_node")
-else()
-  message(WARNING "IPO/LTO not supported: ${output}")
-endif()
+# include(CheckIPOSupported)
+# check_ipo_supported(RESULT result OUTPUT output)
+# if(result)
+#   set_property(TARGET perception_node PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+#   message(STATUS "IPO/LTO enabled for perception_node")
+# else()
+#   message(WARNING "IPO/LTO not supported: ${output}")
+# endif()
 
 # --- 10. INSTALLATION ---
 install(TARGETS perception_node

@@ -20,6 +20,7 @@
 #include "filtering/ground_remover_interface.hpp"
 #include "filtering/bin_based_ground_remover.hpp"
 #include "filtering/slope_based_ground_remover.hpp"
+#include "filtering/patchworkpp_ground_remover.hpp"
 #include "clustering/clusterer_interface.hpp"
 #include "clustering/string_clusterer.hpp"
 #include "clustering/euclidean_clusterer.hpp"
@@ -50,6 +51,7 @@ namespace pcl {
  */
 class LidarPerceptionNode : public rclcpp::Node {
 public:
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
     /**
      * @brief Constructor for LidarPerceptionNode.
      * Initializes all parameters, publishers, and subscribers.
@@ -100,6 +102,30 @@ public:
         } else if (gr_type == "slope_based") {
             ground_remover_ = std::make_unique<fs_perception::SlopeBasedGroundRemover>();
             RCLCPP_INFO(this->get_logger(), "Ground Removal: SLOPE-BASED (Precise)");
+        } else if (gr_type == "patchworkpp") {
+            patchwork::Params pw_params;
+            
+            // Standard parameters from our node (using sensor_z for consistency)
+            this->declare_parameter<double>("sensor_z", -0.50);
+            pw_params.sensor_height = std::abs(this->get_parameter("sensor_z").as_double());
+            
+            // Patchwork++ specific parameters
+            this->declare_parameter<int>("pw_num_iter", 3);
+            this->declare_parameter<double>("pw_th_dist", 0.125);
+            this->declare_parameter<double>("pw_max_range", 25.0);
+            this->declare_parameter<double>("pw_min_range", 1.0);
+            this->declare_parameter<double>("pw_uprightness_thr", 0.707);
+            this->declare_parameter<bool>("pw_enable_RNR", false); // Test without RNR
+
+            pw_params.num_iter = this->get_parameter("pw_num_iter").as_int();
+            pw_params.th_dist = this->get_parameter("pw_th_dist").as_double();
+            pw_params.max_range = this->get_parameter("pw_max_range").as_double();
+            pw_params.min_range = this->get_parameter("pw_min_range").as_double();
+            pw_params.uprightness_thr = this->get_parameter("pw_uprightness_thr").as_double();
+            pw_params.enable_RNR = this->get_parameter("pw_enable_RNR").as_bool();
+
+            ground_remover_ = std::make_unique<fs_perception::PatchworkppGroundRemover>(pw_params);
+            RCLCPP_INFO(this->get_logger(), "Ground Removal: PATCHWORK++ (State-of-the-art)");
         } else {
             ground_remover_ = std::make_unique<fs_perception::SlopeBasedGroundRemover>();
             RCLCPP_INFO(this->get_logger(), "Ground Removal: Defaulting to SLOPE-BASED");
@@ -225,7 +251,10 @@ private:
             return;
         }
         
-        if (raw_cloud->empty()) return;
+        if (raw_cloud->empty()) {
+            RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 5000, "Received empty cloud.");
+            return;
+        }
 
         // Phase 1.1: Lidar Deskewing
         if (this->get_parameter("use_deskewing").as_bool() && deskewer_) {
@@ -237,20 +266,23 @@ private:
             if (profiler_) profiler_->stopTimer("deskewing");
         }
 
-        // Phase 2: Ground Removal (Run on full resolution for maximum precision)
+        // Phase 2: Ground Removal
         if (!ground_remover_) {
             RCLCPP_ERROR_ONCE(this->get_logger(), "Ground remover not initialized!");
             return;
         }
 
         if (profiler_) profiler_->startTimer("ground_removal");
+        
+        // Safety check for pointers
+        if (!obstacles_str_) obstacles_str_ = std::make_shared<fs_perception::PointCloud>();
+        if (!ground_str_) ground_str_ = std::make_shared<fs_perception::PointCloud>();
+        
         obstacles_str_->clear();
         ground_str_->clear();
 
         ground_remover_->removeGround(raw_cloud, obstacles_str_, ground_str_);
-        if (profiler_) profiler_->stopTimer("ground_removal");
-
-        // Phase 2.1: Optional Voxel Grid Downsampling to speed up subsequent stages
+        
         if (this->get_parameter("use_voxel_filter").as_bool()) {
             double leaf_size = this->get_parameter("voxel_size").as_double();
             
@@ -269,6 +301,7 @@ private:
                 RCLCPP_ERROR(this->get_logger(), "VoxelGrid failed: %s", e.what());
             }
         }
+       
 
         // Publish debug ground clouds
         sensor_msgs::msg::PointCloud2 ground_msg;
@@ -280,6 +313,7 @@ private:
         pcl::toROSMsg(*obstacles_str_, no_ground_msg);
         no_ground_msg.header = msg->header;
         pub_no_ground_->publish(no_ground_msg);
+        
 
         // Phase 3: Object Clustering
         if (!clusterer_) {
