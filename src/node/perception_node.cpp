@@ -111,11 +111,11 @@ public:
             
             // Patchwork++ specific parameters
             this->declare_parameter<int>("pw_num_iter", 3);
-            this->declare_parameter<double>("pw_th_dist", 0.125);
+            this->declare_parameter<double>("pw_th_dist", 0.02);
             this->declare_parameter<double>("pw_max_range", 25.0);
-            this->declare_parameter<double>("pw_min_range", 1.0);
+            this->declare_parameter<double>("pw_min_range", 0.5);
             this->declare_parameter<double>("pw_uprightness_thr", 0.707);
-            this->declare_parameter<bool>("pw_enable_RNR", false); // Test without RNR
+            this->declare_parameter<bool>("pw_enable_RNR", true); 
 
             pw_params.num_iter = this->get_parameter("pw_num_iter").as_int();
             pw_params.th_dist = this->get_parameter("pw_th_dist").as_double();
@@ -125,7 +125,7 @@ public:
             pw_params.enable_RNR = this->get_parameter("pw_enable_RNR").as_bool();
 
             ground_remover_ = std::make_unique<fs_perception::PatchworkppGroundRemover>(pw_params);
-            RCLCPP_INFO(this->get_logger(), "Ground Removal: PATCHWORK++ (State-of-the-art)");
+            RCLCPP_INFO(this->get_logger(), "Ground Removal: PATCHWORK++");
         } else {
             ground_remover_ = std::make_unique<fs_perception::SlopeBasedGroundRemover>();
             RCLCPP_INFO(this->get_logger(), "Ground Removal: Defaulting to SLOPE-BASED");
