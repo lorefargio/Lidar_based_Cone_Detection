@@ -47,6 +47,7 @@ def generate_launch_description():
     imu_topic_arg = DeclareLaunchArgument('imu_topic', default_value='/zed/zed_node/imu/data')
     use_vox_filt_arg = DeclareLaunchArgument('use_voxel_filter', default_value='false')
     vox_size_arg = DeclareLaunchArgument('voxel_size', default_value='0.05')
+    static_imu_to_lidar_xyz_arg = DeclareLaunchArgument('static_imu_to_lidar_xyz',default_value='[0.0,0.053,0.0335]')
 
     # Our perception node
     perception_node = Node(
@@ -79,6 +80,7 @@ def generate_launch_description():
             'imu_topic': LaunchConfiguration('imu_topic'),
             'use_voxel_filter': LaunchConfiguration('use_voxel_filter'),
             'voxel_size': LaunchConfiguration('voxel_size'),
+            'static_imu_to_lidar_xyz':LaunchConfiguration('static_imu_to_lidar_xyz'),
         }]
     )
 
@@ -131,8 +133,9 @@ def generate_launch_description():
         imu_topic_arg,
         use_vox_filt_arg,
         vox_size_arg,
+        static_imu_to_lidar_xyz_arg,
         perception_node,
         foxglove_node,
-        play_bag
+        play_bag,
     ])
         

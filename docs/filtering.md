@@ -28,8 +28,9 @@ Tutti i parametri sono configurabili tramite file di launch:
 | Parametro | Descrizione | Influenza sulla Variazione |
 | :--- | :--- | :--- |
 | `sensor_z` | Altezza del LiDAR dal suolo (default: -0.52m). | Se errato, l'intera pipeline fallisce ignorando o tagliando i coni. |
-| `max_slope` | (Slope-based) Pendenza massima del suolo. | Aumentarlo permette di rilevare terreni più ripidi, ma rischia di includere basi di oggetti. |
-| `local_threshold` | (Bin-based) Altezza minima sopra il punto più basso. | Troppo alta: si perdono piccoli ostacoli. Troppo bassa: la polvere o il rumore diventano ostacoli. |
+| `slope_max_slope` | (Slope-based) Pendenza massima del suolo. | Aumentarlo permette di rilevare terreni più ripidi, ma rischia di includere basi di oggetti. |
+| `bin_local_threshold` | (Bin-based) Altezza minima sopra il punto più basso. | Troppo alta: si perdono piccoli ostacoli. Troppo bassa: la polvere o il rumore diventano ostacoli. |
+| `pw_th_dist` | (Patchwork++) Soglia di distanza dal piano. | Definisce la precisione del fit del terreno. |
 
 ---
 
