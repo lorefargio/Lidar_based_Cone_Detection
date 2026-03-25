@@ -29,6 +29,16 @@ Il modulo è implementato come una classe utility utilizzata dal `LidarPerceptio
 *   **Processo:** Viene chiamato immediatamente dopo la conversione del messaggio PointCloud2, prima di qualsiasi fase di filtraggio o clustering.
 *   **Performance:** Utilizza Eigen per operazioni vettoriali ottimizzate e un buffer thread-safe.
 
-## 4. Requisiti Hardware
+## 4. Parametri e Configurazione
+
+| Parametro | Default | Descrizione |
+| :--- | :--- | :--- |
+| `use_deskewing` | `true` | Abilita/Disabilita l'intero modulo. |
+| `imu_topic` | `/zed/zed_node/imu/data` | Topic IMU per i dati di orientamento. |
+| `deskew_use_translation` | `true` | Se attivo, compensa il movimento lineare indotto dalla rotazione (lever arm). |
+| `static_imu_to_lidar_xyz` | `[0,0,0]` | Vettore di traslazione tra IMU e LiDAR (m). |
+
+## 5. Requisiti Hardware
 *   LiDAR con supporto ai timestamp per punto.
-*   IMU a bassa latenza.
+*   IMU a bassa latenza (consigliata > 200Hz).
+

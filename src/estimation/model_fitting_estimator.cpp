@@ -37,10 +37,9 @@ Cone ModelFittingEstimator::estimate(const PointCloudPtr& cluster) {
     }
 
     // Phase 2: Height and Position statistics
-    const float ground_z_level = -0.52f;
     PointT min_pt, max_pt;
     pcl::getMinMax3D(*cluster, min_pt, max_pt);
-    cone.height = max_pt.z - ground_z_level;
+    cone.height = max_pt.z - config_.ground_z_level;
     cone.z = min_pt.z;
 
     // Fast height pre-filter

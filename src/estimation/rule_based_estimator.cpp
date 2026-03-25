@@ -17,8 +17,6 @@ RuleBasedEstimator::RuleBasedEstimator() : config_(Config()) {}
 RuleBasedEstimator::RuleBasedEstimator(const Config& config) : config_(config) {}
 
 Cone RuleBasedEstimator::estimate(const PointCloudPtr& cluster) {
-    const float ground_z_level = -0.52f;
-
     Cone cone;
     cone.color = ConeColor::UNKNOWN; 
     cone.confidence = 0.0f;
@@ -83,7 +81,7 @@ Cone RuleBasedEstimator::estimate(const PointCloudPtr& cluster) {
     PointT min_pt, max_pt;
     pcl::getMinMax3D(*cluster, min_pt, max_pt);
     
-    cone.height = max_pt.z - ground_z_level; 
+    cone.height = max_pt.z - config_.ground_z_level; 
     cone.z = min_pt.z;
 
     // Horizontal dimensions

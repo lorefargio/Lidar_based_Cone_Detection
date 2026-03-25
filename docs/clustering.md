@@ -42,10 +42,11 @@ Versione 3D del Grid Clusterer. Crea voxel cubici e cerca componenti connesse tr
 
 | Parametro | Descrizione | Influenza sulla Variazione |
 | :--- | :--- | :--- |
-| `grid_resolution` | Dimensione della cella (default: 0.15m). | Se troppo grande, i coni vicini si fondono. Se troppo piccola, un singolo cono si divide in più cluster. |
-| `epsilon` (DBSCAN) | Raggio di ricerca per la densità. | Se troppo piccolo, scarta troppi coni (li vede come noise). Se troppo grande, fonde tutto ciò che incontra. |
-| `alpha` (Adaptive) | Coefficiente di crescita di epsilon con la distanza. | Regola la sensibilità ai coni lontani (meno densi). |
-| `min_pts` | Punti minimi per formare un cluster. | Impedisce la creazione di cluster da falsi ritorni o polvere. |
+| `grid_resolution` | Dimensione della cella (default: 0.20m). | Se troppo grande, i coni vicini si fondono. Se troppo piccola, un singolo cono si divide in più cluster. |
+| `dbscan_eps` | Raggio di ricerca per la densità. | Se troppo piccolo, scarta troppi coni (li vede come noise). Se troppo grande, fonde tutto ciò che incontra. |
+| `hdbscan_alpha` | Coefficiente di crescita di epsilon con la distanza (Adaptive). | Regola la sensibilità ai coni lontani (meno densi). |
+| `dbscan_min_pts` | Punti minimi per formare un cluster (DBSCAN/Adaptive). | Impedisce la creazione di cluster da falsi ritorni o polvere. |
 | `min_cluster_size`| Punti minimi totali per un oggetto candidato. | Un cono a 15m può avere solo 5 punti, a 2m ne ha 100. Parametro critico per il richiamo (Recall). |
+| `string_max_dist` | Distanza massima radiale tra punti consecutivi. | Parametro core dell'algoritmo String. |
 
 

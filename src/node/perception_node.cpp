@@ -57,157 +57,229 @@ public:
      * Initializes all parameters, publishers, and subscribers.
      */
     LidarPerceptionNode() : Node("lidar_perception_node") {
-        // --- Mandatory Bag Parameter Check ---
+        // --- 1. GENERAL PARAMETERS ---
         this->declare_parameter<std::string>("bag_path", "");
+        this->declare_parameter<std::string>("clustering_algorithm", "grid");
+        this->declare_parameter<std::string>("ground_remover_type", "slope_based");
+        this->declare_parameter<std::string>("estimator_type", "rule_based");
+        this->declare_parameter<std::string>("log_dir", "log_profiler/");
+        
+        // Common geometric/filtering parameters
+        this->declare_parameter<double>("sensor_z", -0.52);
+        this->declare_parameter<double>("max_range", 25.0);
+        this->declare_parameter<int>("min_cluster_size", 3);
+        this->declare_parameter<int>("max_cluster_size", 300);
+        
         std::string bag_path = this->get_parameter("bag_path").as_string();
         if (bag_path.empty()) {
-            RCLCPP_ERROR(this->get_logger(), "FATAL: 'bag_path' parameter is missing! The node cannot start without a valid bag.");
+            RCLCPP_ERROR(this->get_logger(), "FATAL: 'bag_path' parameter is missing!");
             rclcpp::shutdown();
             exit(EXIT_FAILURE);
         }
-        RCLCPP_INFO(this->get_logger(), "Processing bag: %s", bag_path.c_str());
 
-        // --- Algorithm selection parameters ---
-        this->declare_parameter<std::string>("clustering_algorithm", "grid");
-        std::string algo = this->get_parameter("clustering_algorithm").as_string();
-
-        // Factory for clustering algorithms
-        if (algo == "euclidean") {
-            clusterer_ = std::make_unique<fs_perception::EuclideanClusterer>(0.35f, 3, 300);
-            RCLCPP_INFO(this->get_logger(), "Clustering Algorithm: EUCLIDEAN (KD-Tree)");
-        } else if (algo == "string") {
-            clusterer_ = std::make_unique<fs_perception::StringClusterer>();
-            RCLCPP_INFO(this->get_logger(), "Clustering Algorithm: STRING (Linear)");
-        } else if (algo == "dbscan") {
-            clusterer_ = std::make_unique<fs_perception::DBSCANClusterer>(0.30f, 3, 3, 500);
-            RCLCPP_INFO(this->get_logger(), "Clustering Algorithm: DBSCAN (KD-Tree)");
-        } else if (algo == "hdbscan") {
-            clusterer_ = std::make_unique<fs_perception::AdaptiveDBSCANClusterer>(0.15f, 0.015f, 3, 3, 500);
-            RCLCPP_INFO(this->get_logger(), "Clustering Algorithm: ADAPTIVE-DBSCAN (Distance Scaled)");
-        } else if (algo == "voxel") {
-            clusterer_ = std::make_unique<fs_perception::VoxelConnectedComponents>(0.15f, 3, 500);
-            RCLCPP_INFO(this->get_logger(), "Clustering Algorithm: VOXEL CONNECTED COMPONENTS (3D Grid)");
-        } else {
-            clusterer_ = std::make_unique<fs_perception::GridClusterer>(0.20f, 25.0f, 3, 300);
-            RCLCPP_INFO(this->get_logger(), "Clustering Algorithm: GRID (2D Connected Components)");
-        }
-
-        // Factory for ground removal algorithms
-        this->declare_parameter<std::string>("ground_remover_type", "slope_based");
+        // --- 2. GROUND REMOVAL CONFIGURATION ---
         std::string gr_type = this->get_parameter("ground_remover_type").as_string();
+        float sensor_z = static_cast<float>(this->get_parameter("sensor_z").as_double());
+        float max_range = static_cast<float>(this->get_parameter("max_range").as_double());
 
         if (gr_type == "bin_based") {
-            ground_remover_ = std::make_unique<fs_perception::BinBasedGroundRemover>();
-            RCLCPP_INFO(this->get_logger(), "Ground Removal: BIN-BASED (Fast)");
+            fs_perception::BinBasedGroundRemover::Config cfg;
+            this->declare_parameter<double>("bin_local_threshold", 0.02);
+            this->declare_parameter<double>("bin_hard_cutoff", -0.47);
+            this->declare_parameter<int>("bin_segments", 500);
+            this->declare_parameter<int>("bin_bins", 500);
+            
+            cfg.sensor_z = sensor_z;
+            cfg.max_range = max_range;
+            cfg.local_threshold = static_cast<float>(this->get_parameter("bin_local_threshold").as_double());
+            cfg.hard_ground_cutoff = static_cast<float>(this->get_parameter("bin_hard_cutoff").as_double());
+            cfg.segments = this->get_parameter("bin_segments").as_int();
+            cfg.bins = this->get_parameter("bin_bins").as_int();
+            
+            ground_remover_ = std::make_unique<fs_perception::BinBasedGroundRemover>(cfg);
+            RCLCPP_INFO(this->get_logger(), "Ground Removal: BIN-BASED");
         } else if (gr_type == "slope_based") {
-            ground_remover_ = std::make_unique<fs_perception::SlopeBasedGroundRemover>();
-            RCLCPP_INFO(this->get_logger(), "Ground Removal: SLOPE-BASED (Precise)");
+            fs_perception::SlopeBasedGroundRemover::Config cfg;
+            this->declare_parameter<double>("slope_max_slope", 0.08);
+            this->declare_parameter<double>("slope_max_z_diff", 0.05);
+            this->declare_parameter<double>("slope_initial_threshold", 0.05);
+            this->declare_parameter<int>("slope_segments", 360);
+
+            cfg.sensor_z = sensor_z;
+            cfg.max_range = max_range;
+            cfg.max_slope = static_cast<float>(this->get_parameter("slope_max_slope").as_double());
+            cfg.max_z_diff = static_cast<float>(this->get_parameter("slope_max_z_diff").as_double());
+            cfg.initial_ground_threshold = static_cast<float>(this->get_parameter("slope_initial_threshold").as_double());
+            cfg.segments = this->get_parameter("slope_segments").as_int();
+
+            ground_remover_ = std::make_unique<fs_perception::SlopeBasedGroundRemover>(cfg);
+            RCLCPP_INFO(this->get_logger(), "Ground Removal: SLOPE-BASED");
         } else if (gr_type == "patchworkpp") {
             patchwork::Params pw_params;
-            
-            // Standard parameters from our node (using sensor_z for consistency)
-            this->declare_parameter<double>("sensor_z", -0.50);
-            pw_params.sensor_height = std::abs(this->get_parameter("sensor_z").as_double());
-            
-            // Patchwork++ specific parameters
             this->declare_parameter<int>("pw_num_iter", 3);
             this->declare_parameter<double>("pw_th_dist", 0.02);
-            this->declare_parameter<double>("pw_max_range", 25.0);
             this->declare_parameter<double>("pw_min_range", 0.5);
             this->declare_parameter<double>("pw_uprightness_thr", 0.707);
             this->declare_parameter<bool>("pw_enable_RNR", true); 
 
+            pw_params.sensor_height = std::abs(sensor_z);
+            pw_params.max_range = max_range;
             pw_params.num_iter = this->get_parameter("pw_num_iter").as_int();
             pw_params.th_dist = this->get_parameter("pw_th_dist").as_double();
-            pw_params.max_range = this->get_parameter("pw_max_range").as_double();
             pw_params.min_range = this->get_parameter("pw_min_range").as_double();
             pw_params.uprightness_thr = this->get_parameter("pw_uprightness_thr").as_double();
             pw_params.enable_RNR = this->get_parameter("pw_enable_RNR").as_bool();
 
             ground_remover_ = std::make_unique<fs_perception::PatchworkppGroundRemover>(pw_params);
             RCLCPP_INFO(this->get_logger(), "Ground Removal: PATCHWORK++");
+        }
+
+        // --- 3. CLUSTERING CONFIGURATION ---
+        std::string cl_algo = this->get_parameter("clustering_algorithm").as_string();
+        int min_cluster = this->get_parameter("min_cluster_size").as_int();
+        int max_cluster = this->get_parameter("max_cluster_size").as_int();
+
+        if (cl_algo == "euclidean") {
+            this->declare_parameter<double>("euclidean_tolerance", 0.35);
+            float tol = static_cast<float>(this->get_parameter("euclidean_tolerance").as_double());
+            clusterer_ = std::make_unique<fs_perception::EuclideanClusterer>(tol, min_cluster, max_cluster);
+            RCLCPP_INFO(this->get_logger(), "Clustering: EUCLIDEAN");
+        } else if (cl_algo == "dbscan") {
+            this->declare_parameter<double>("dbscan_eps", 0.30);
+            this->declare_parameter<int>("dbscan_min_pts", 3);
+            float eps = static_cast<float>(this->get_parameter("dbscan_eps").as_double());
+            int min_pts = this->get_parameter("dbscan_min_pts").as_int();
+            clusterer_ = std::make_unique<fs_perception::DBSCANClusterer>(eps, min_pts, min_cluster, max_cluster);
+            RCLCPP_INFO(this->get_logger(), "Clustering: DBSCAN");
+        } else if (cl_algo == "hdbscan") {
+            this->declare_parameter<double>("hdbscan_eps_base", 0.15);
+            this->declare_parameter<double>("hdbscan_alpha", 0.015);
+            this->declare_parameter<int>("hdbscan_min_pts", 3);
+            float eps_base = static_cast<float>(this->get_parameter("hdbscan_eps_base").as_double());
+            float alpha = static_cast<float>(this->get_parameter("hdbscan_alpha").as_double());
+            int min_pts = this->get_parameter("hdbscan_min_pts").as_int();
+            clusterer_ = std::make_unique<fs_perception::AdaptiveDBSCANClusterer>(eps_base, alpha, min_pts, min_cluster, max_cluster);
+            RCLCPP_INFO(this->get_logger(), "Clustering: ADAPTIVE-DBSCAN");
+        } else if (cl_algo == "voxel") {
+            this->declare_parameter<double>("voxel_grid_size", 0.15);
+            float v_size = static_cast<float>(this->get_parameter("voxel_grid_size").as_double());
+            clusterer_ = std::make_unique<fs_perception::VoxelConnectedComponents>(v_size, min_cluster, max_cluster);
+            RCLCPP_INFO(this->get_logger(), "Clustering: VOXEL");
+        } else if (cl_algo == "string") {
+            fs_perception::StringClusterer::Config cfg;
+            this->declare_parameter<double>("string_max_dist", 0.3);
+            this->declare_parameter<double>("string_max_int_jump", 100.0);
+            cfg.max_dist = static_cast<float>(this->get_parameter("string_max_dist").as_double());
+            cfg.max_int_jump = static_cast<float>(this->get_parameter("string_max_int_jump").as_double());
+            cfg.min_cluster_size = min_cluster;
+            cfg.max_cluster_size = max_cluster;
+            clusterer_ = std::make_unique<fs_perception::StringClusterer>(cfg);
+            RCLCPP_INFO(this->get_logger(), "Clustering: STRING");
         } else {
-            ground_remover_ = std::make_unique<fs_perception::SlopeBasedGroundRemover>();
-            RCLCPP_INFO(this->get_logger(), "Ground Removal: Defaulting to SLOPE-BASED");
+            this->declare_parameter<double>("grid_resolution", 0.20);
+            float res = static_cast<float>(this->get_parameter("grid_resolution").as_double());
+            clusterer_ = std::make_unique<fs_perception::GridClusterer>(res, max_range, min_cluster, max_cluster);
+            RCLCPP_INFO(this->get_logger(), "Clustering: GRID");
         }
 
-        // Post-filtering parameters (Downsampling)
-        this->declare_parameter<bool>("use_voxel_filter", false);
-        this->declare_parameter<double>("voxel_size", 0.05);
-
-        // Deskewing parameters
-        this->declare_parameter<bool>("use_deskewing", true);
-        this->declare_parameter<std::string>("imu_topic", "/zed/zed_node/imu/data");
-
-        if (this->get_parameter("use_deskewing").as_bool()) {
-            fs_perception::Deskewer::Config deskewer_cfg;
-            deskewer_ = std::make_unique<fs_perception::Deskewer>(deskewer_cfg);
-            RCLCPP_INFO(this->get_logger(), "Lidar Deskewing ENABLED.");
-        }
-
-        // Factory for estimation algorithms
-        this->declare_parameter<std::string>("estimator_type", "rule_based");
+        // --- 4. ESTIMATION CONFIGURATION ---
         std::string est_type = this->get_parameter("estimator_type").as_string();
-
-        // Estimation parameters (PCA & Geometric rules)
-        this->declare_parameter<double>("dynamic_width_decay", 0.005);
-        this->declare_parameter<int>("min_points_at_10m", 10);
+        
+        // PCA Params (shared between estimators)
         this->declare_parameter<double>("pca_max_linearity", 0.8);
         this->declare_parameter<double>("pca_max_planarity", 0.8);
-        this->declare_parameter<double>("pca_min_scatter", 0.02); // Keep optimized value
+        this->declare_parameter<double>("pca_min_scatter", 0.02);
+        
+        float max_lin = static_cast<float>(this->get_parameter("pca_max_linearity").as_double());
+        float max_plan = static_cast<float>(this->get_parameter("pca_max_planarity").as_double());
+        float min_scat = static_cast<float>(this->get_parameter("pca_min_scatter").as_double());
 
         if (est_type == "rule_based") {
-            fs_perception::RuleBasedEstimator::Config config;
-            config.dynamic_width_decay = this->get_parameter("dynamic_width_decay").as_double();
-            config.min_points_at_10m = this->get_parameter("min_points_at_10m").as_int();
-            config.max_linearity = this->get_parameter("pca_max_linearity").as_double();
-            config.max_planarity = this->get_parameter("pca_max_planarity").as_double();
-            config.min_scatter = this->get_parameter("pca_min_scatter").as_double();
+            fs_perception::RuleBasedEstimator::Config cfg;
+            this->declare_parameter<double>("rule_min_height", 0.10);
+            this->declare_parameter<double>("rule_max_height", 0.50);
+            this->declare_parameter<double>("rule_base_min_width", 0.10);
+            this->declare_parameter<double>("rule_max_width", 0.36);
+            this->declare_parameter<double>("rule_dynamic_width_decay", 0.005);
+            this->declare_parameter<int>("rule_min_points_at_10m", 10);
+            this->declare_parameter<double>("rule_min_intensity", 5.0);
+            
+            cfg.min_height = static_cast<float>(this->get_parameter("rule_min_height").as_double());
+            cfg.max_height = static_cast<float>(this->get_parameter("rule_max_height").as_double());
+            cfg.base_min_width = static_cast<float>(this->get_parameter("rule_base_min_width").as_double());
+            cfg.max_width = static_cast<float>(this->get_parameter("rule_max_width").as_double());
+            cfg.dynamic_width_decay = static_cast<float>(this->get_parameter("rule_dynamic_width_decay").as_double());
+            cfg.min_points_at_10m = this->get_parameter("rule_min_points_at_10m").as_int();
+            cfg.min_intensity = static_cast<float>(this->get_parameter("rule_min_intensity").as_double());
+            cfg.max_linearity = max_lin;
+            cfg.max_planarity = max_plan;
+            cfg.min_scatter = min_scat;
+            cfg.ground_z_level = sensor_z;
 
-            estimator_ = std::make_unique<fs_perception::RuleBasedEstimator>(config);
-            RCLCPP_INFO(this->get_logger(), "Estimator Algorithm: RULE-BASED (Geometric Classification)");
+            estimator_ = std::make_unique<fs_perception::RuleBasedEstimator>(cfg);
+            RCLCPP_INFO(this->get_logger(), "Estimator: RULE-BASED");
         } else if (est_type == "ransac") {
-            estimator_ = std::make_unique<fs_perception::ModelFittingEstimator>();
-            RCLCPP_INFO(this->get_logger(), "Estimator Algorithm: RANSAC MODEL FITTING (Cylinder)");
-        } else {
-            estimator_ = std::make_unique<fs_perception::RuleBasedEstimator>();
-            RCLCPP_INFO(this->get_logger(), "Estimator Algorithm: Defaulting to RULE-BASED");
+            fs_perception::ModelFittingEstimator::Config cfg;
+            this->declare_parameter<double>("ransac_dist_threshold", 0.05);
+            this->declare_parameter<int>("ransac_max_iter", 1000);
+            this->declare_parameter<double>("ransac_radius_min", 0.05);
+            this->declare_parameter<double>("ransac_radius_max", 0.18);
+            this->declare_parameter<double>("ransac_min_inlier_ratio", 0.4);
+
+            cfg.distance_threshold = static_cast<float>(this->get_parameter("ransac_dist_threshold").as_double());
+            cfg.max_iterations = this->get_parameter("ransac_max_iter").as_int();
+            cfg.radius_min = static_cast<float>(this->get_parameter("ransac_radius_min").as_double());
+            cfg.radius_max = static_cast<float>(this->get_parameter("ransac_radius_max").as_double());
+            cfg.min_inlier_ratio = static_cast<float>(this->get_parameter("ransac_min_inlier_ratio").as_double());
+            cfg.max_linearity = max_lin;
+            cfg.min_scatter = min_scat;
+            cfg.ground_z_level = sensor_z;
+
+            estimator_ = std::make_unique<fs_perception::ModelFittingEstimator>(cfg);
+            RCLCPP_INFO(this->get_logger(), "Estimator: RANSAC");
         }
 
-        // Benchmarking Setup
-        this->declare_parameter<std::string>("log_dir", "log_profiler/");
+        // --- 5. DESKEWING CONFIGURATION ---
+        this->declare_parameter<bool>("use_deskewing", true);
+        this->declare_parameter<std::string>("imu_topic", "/zed/zed_node/imu/data");
+        this->declare_parameter<bool>("deskew_use_translation", true);
+        this->declare_parameter<std::vector<double>>("static_imu_to_lidar_xyz", {0.0, 0.0, 0.0});
+
+        if (this->get_parameter("use_deskewing").as_bool()) {
+            fs_perception::Deskewer::Config d_cfg;
+            d_cfg.use_translation = this->get_parameter("deskew_use_translation").as_bool();
+            
+            auto xyz = this->get_parameter("static_imu_to_lidar_xyz").as_double_array();
+            if (xyz.size() == 3) {
+                d_cfg.static_imu_to_lidar = Eigen::Vector3f(xyz[0], xyz[1], xyz[2]);
+            }
+            
+            deskewer_ = std::make_unique<fs_perception::Deskewer>(d_cfg);
+            RCLCPP_INFO(this->get_logger(), "Deskewing: ENABLED");
+        }
+
+        // --- 6. POST-PROCESSING & BENCHMARKING ---
+        this->declare_parameter<bool>("use_voxel_filter", false);
+        this->declare_parameter<double>("voxel_size", 0.05);
+        
         std::string log_dir = this->get_parameter("log_dir").as_string();
-        
-        // Ensure log directory ends with a slash
         if (!log_dir.empty() && log_dir.back() != '/') log_dir += '/';
+        std::filesystem::create_directories(log_dir); 
         
-        try {
-            std::filesystem::create_directories(log_dir); 
-        } catch (const std::exception& e) {
-            RCLCPP_ERROR(this->get_logger(), "Failed to create log directory %s: %s", log_dir.c_str(), e.what());
-        }
-        
-        profiler_ = std::make_unique<fs_perception::PerformanceProfiler>(algo);
-        json_file_path_ = log_dir + "profiler_" + algo + ".json";
-        RCLCPP_INFO(this->get_logger(), "Profiler initialized. Will save to: %s", json_file_path_.c_str());
+        profiler_ = std::make_unique<fs_perception::PerformanceProfiler>(cl_algo);
+        json_file_path_ = log_dir + "profiler_" + cl_algo + ".json";
 
-        // --- ROS Infrastructure (Pub/Sub) ---
-        rclcpp::QoS qos(10);
-        qos.reliability(rclcpp::ReliabilityPolicy::Reliable);
-        qos.durability(rclcpp::DurabilityPolicy::Volatile);
-
+        // --- 7. PUBLISHERS & SUBSCRIBERS ---
         sub_lidar_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
-            "/lidar_points", qos, 
+            "/lidar_points", rclcpp::SensorDataQoS(), 
             std::bind(&LidarPerceptionNode::callback, this, std::placeholders::_1));
 
         if (this->get_parameter("use_deskewing").as_bool()) {
-            std::string imu_topic = this->get_parameter("imu_topic").as_string();
             sub_imu_ = this->create_subscription<sensor_msgs::msg::Imu>(
-                imu_topic, 100, 
+                this->get_parameter("imu_topic").as_string(), 100, 
                 [this](const sensor_msgs::msg::Imu::SharedPtr msg) {
                     if (deskewer_) deskewer_->addImuMessage(msg);
                 });
-            RCLCPP_INFO(this->get_logger(), "Subscribed to IMU: %s", imu_topic.c_str());
         }
 
         pub_markers_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("/perception/cones_vis", 10);
@@ -215,8 +287,6 @@ public:
         pub_cone_points_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/perception/cone_points", 10);
         pub_ground_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/perception/ground_debug", 10);
         pub_no_ground_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/perception/no_ground", 10);
-
-        RCLCPP_INFO(this->get_logger(), "Perception Node Started.");
     }
 
     /**

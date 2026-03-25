@@ -3,16 +3,14 @@
 
 namespace fs_perception {
 
+StringClusterer::StringClusterer() : config_(Config()) {}
+
+StringClusterer::StringClusterer(const Config& config) : config_(config) {}
+
 void StringClusterer::cluster(const PointCloudPtr& cloud, std::vector<PointCloudPtr>& clusters) {
     if (cloud->empty()) {
         return;
     }
-
-    // Parameters optimized for high-density sensors (e.g., Hesai Pandar40P)
-    const float MAX_DIST_ = 0.3f;        ///< Base distance threshold between consecutive points.
-    const int MIN_CLUSTER_SIZE = 3;      ///< Minimum point count for a cone.
-    const int MAX_CLUSTER_SIZE = 300;    ///< Maximum point count filter.
-    const float MAX_INT_JUMP = 100.0f;   ///< Intensity jump limit between same object points.
 
     // Algorithm assumes points are ordered by ring and firing sequence by the driver.
     // This allows for linear O(N) clustering by checking point-to-point proximity.
@@ -26,7 +24,7 @@ void StringClusterer::cluster(const PointCloudPtr& cloud, std::vector<PointCloud
 
         // Dynamic distance threshold scaling with radial range
         float range = std::sqrt(pt.x*pt.x + pt.y*pt.y);
-        float dynamic_threshold = MAX_DIST_ + (range * 0.02f);
+        float dynamic_threshold = config_.max_dist + (range * 0.02f);
         float max_dist_sq = dynamic_threshold * dynamic_threshold;
 
         // Squared Euclidean distance for performance
@@ -36,14 +34,14 @@ void StringClusterer::cluster(const PointCloudPtr& cloud, std::vector<PointCloud
 
         // Check for intensity discontinuities indicative of object boundaries
         float int_diff = std::abs(pt.intensity - prev.intensity);
-        bool intensity_jump = int_diff > MAX_INT_JUMP;
+        bool intensity_jump = int_diff > config_.max_int_jump;
         
         // Connectivity check
         if (dist_sq < max_dist_sq && !intensity_jump) {
             current_cluster->push_back(pt);
         } else {
             // End of current string; save if size constraints are met
-            if (current_cluster->size() >= MIN_CLUSTER_SIZE && current_cluster->size() <= MAX_CLUSTER_SIZE) {
+            if (current_cluster->size() >= (size_t)config_.min_cluster_size && current_cluster->size() <= (size_t)config_.max_cluster_size) {
                 clusters.push_back(current_cluster);
             }
             // Start a new candidate cluster
@@ -53,7 +51,7 @@ void StringClusterer::cluster(const PointCloudPtr& cloud, std::vector<PointCloud
     }
 
     // Final cluster validation after loop
-    if (current_cluster->size() >= MIN_CLUSTER_SIZE) {
+    if (current_cluster->size() >= (size_t)config_.min_cluster_size) {
         clusters.push_back(current_cluster);
     }
 }

@@ -18,6 +18,7 @@ public:
      * @brief Configuration parameters for the model fitting algorithm.
      */
     struct Config {
+        float ground_z_level = -0.52f;      ///< Estimated ground level (m) to calculate object height.
         float normal_distance_weight = 0.1f; ///< Weight assigned to surface normals for cylinder fitting.
         int max_iterations = 1000;          ///< Maximum RANSAC iterations.
         float distance_threshold = 0.05f;   ///< Threshold for considering a point an inlier.

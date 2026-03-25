@@ -6,77 +6,47 @@ from launch.conditions import IfCondition
 from launch_ros.actions import Node
 
 def generate_launch_description():
-    # Argument for the rosbag file path (MANDATORY)
-    bag_arg = DeclareLaunchArgument(
-        'bag',
-        description='Path to the rosbag to play. This parameter is MANDATORY; the node will fail if not provided.'
-    )
+    # --- 1. GENERAL ARGUMENTS ---
+    bag_arg = DeclareLaunchArgument('bag', default_value='', description='Path to rosbag to play')
+    cl_algo_arg = DeclareLaunchArgument('clustering_algorithm', default_value='grid', description='Algorithm: grid, euclidean, string, dbscan, hdbscan, voxel')
+    gr_type_arg = DeclareLaunchArgument('ground_remover_type', default_value='slope_based', description='Algorithm: bin_based, slope_based, patchworkpp')
+    est_type_arg = DeclareLaunchArgument('estimator_type', default_value='rule_based', description='Algorithm: rule_based, ransac')
+    
+    # --- 2. COMMON PARAMETERS ---
+    sensor_z_arg = DeclareLaunchArgument('sensor_z', default_value='-0.52', description='Lidar height from ground')
+    max_range_arg = DeclareLaunchArgument('max_range', default_value='25.0', description='Max processing range')
+    min_cluster_arg = DeclareLaunchArgument('min_cluster_size', default_value='3', description='Min points per cluster')
+    max_cluster_arg = DeclareLaunchArgument('max_cluster_size', default_value='300', description='Max points per cluster')
 
-    clusterer_arg = DeclareLaunchArgument(
-        'clustering_algorithm',
-        default_value='grid',
-        description='Clustering algorithm to use: "grid", "string", or "euclidean" , "dbscan" , "hdbscan", "voxel"'
-    )
+    # --- 3. GROUND REMOVAL PARAMETERS ---
+    # Bin-based
+    bin_thr_arg = DeclareLaunchArgument('bin_local_threshold', default_value='0.02')
+    bin_cutoff_arg = DeclareLaunchArgument('bin_hard_cutoff', default_value='-0.47')
+    # Slope-based
+    slope_max_arg = DeclareLaunchArgument('slope_max_slope', default_value='0.08')
+    # Patchwork++
+    pw_iter_arg = DeclareLaunchArgument('pw_num_iter', default_value='3')
+    pw_dist_arg = DeclareLaunchArgument('pw_th_dist', default_value='0.02')
 
-    ground_remover_arg = DeclareLaunchArgument(
-        'ground_remover_type',
-        default_value='slope_based',
-        description='Ground removal algorithm to use: "bin_based" or "slope_based"'
-    )
+    # --- 4. CLUSTERING PARAMETERS ---
+    # Euclidean
+    euc_tol_arg = DeclareLaunchArgument('euclidean_tolerance', default_value='0.35')
+    # DBSCAN
+    db_eps_arg = DeclareLaunchArgument('dbscan_eps', default_value='0.30')
+    # Voxel
+    vox_grid_arg = DeclareLaunchArgument('voxel_grid_size', default_value='0.15')
 
-    estimator_arg = DeclareLaunchArgument(
-        'estimator_type',
-        default_value='rule_based',
-        description='Estimator algorithm to use: "rule_based" or "ransac"'
-    )
+    # --- 5. ESTIMATION PARAMETERS ---
+    pca_lin_arg = DeclareLaunchArgument('pca_max_linearity', default_value='0.8')
+    pca_scat_arg = DeclareLaunchArgument('pca_min_scatter', default_value='0.02')
+    rule_decay_arg = DeclareLaunchArgument('rule_dynamic_width_decay', default_value='0.005')
+    rule_pts_arg = DeclareLaunchArgument('rule_min_points_at_10m', default_value='10')
 
-    dynamic_width_decay_arg = DeclareLaunchArgument(
-        'dynamic_width_decay',
-        default_value='0.005',
-        description='Decay factor for dynamic width threshold in rule-based estimator'
-    )
-
-    min_points_at_10m_arg = DeclareLaunchArgument(
-        'min_points_at_10m',
-        default_value='10',
-        description='Minimum points expected for a cone at 10 meters distance'
-    )
-
-    pca_max_linearity_arg = DeclareLaunchArgument(
-        'pca_max_linearity',
-        default_value='0.8',
-        description='PCA Max Linearity threshold to reject posts/legs'
-    )
-
-    pca_min_scatter_arg = DeclareLaunchArgument(
-        'pca_min_scatter',
-        default_value='0.005',
-        description='PCA Min Scatter threshold to ensure volumetric shape'
-    )
-
-    use_voxel_filter_arg = DeclareLaunchArgument(
-        'use_voxel_filter',
-        default_value='false',
-        description='Whether to use voxel grid downsampling'
-    )
-
-    voxel_size_arg = DeclareLaunchArgument(
-        'voxel_size',
-        default_value='0.05',
-        description='Leaf size for voxel grid filter (meters)'
-    )
-
-    use_deskewing_arg = DeclareLaunchArgument(
-        'use_deskewing',
-        default_value='true',
-        description='Whether to enable LiDAR deskewing using IMU data'
-    )
-
-    imu_topic_arg = DeclareLaunchArgument(
-        'imu_topic',
-        default_value='/zed/zed_node/imu/data',
-        description='Topic name for the IMU data'
-    )
+    # --- 6. DESKEWING & FILTERS ---
+    use_deskew_arg = DeclareLaunchArgument('use_deskewing', default_value='true')
+    imu_topic_arg = DeclareLaunchArgument('imu_topic', default_value='/zed/zed_node/imu/data')
+    use_vox_filt_arg = DeclareLaunchArgument('use_voxel_filter', default_value='false')
+    vox_size_arg = DeclareLaunchArgument('voxel_size', default_value='0.05')
 
     # Our perception node
     perception_node = Node(
@@ -89,14 +59,26 @@ def generate_launch_description():
             'clustering_algorithm': LaunchConfiguration('clustering_algorithm'),
             'ground_remover_type': LaunchConfiguration('ground_remover_type'),
             'estimator_type': LaunchConfiguration('estimator_type'),
-            'dynamic_width_decay': LaunchConfiguration('dynamic_width_decay'),
-            'min_points_at_10m': LaunchConfiguration('min_points_at_10m'),
+            'sensor_z': LaunchConfiguration('sensor_z'),
+            'max_range': LaunchConfiguration('max_range'),
+            'min_cluster_size': LaunchConfiguration('min_cluster_size'),
+            'max_cluster_size': LaunchConfiguration('max_cluster_size'),
+            'bin_local_threshold': LaunchConfiguration('bin_local_threshold'),
+            'bin_hard_cutoff': LaunchConfiguration('bin_hard_cutoff'),
+            'slope_max_slope': LaunchConfiguration('slope_max_slope'),
+            'pw_num_iter': LaunchConfiguration('pw_num_iter'),
+            'pw_th_dist': LaunchConfiguration('pw_th_dist'),
+            'euclidean_tolerance': LaunchConfiguration('euclidean_tolerance'),
+            'dbscan_eps': LaunchConfiguration('dbscan_eps'),
+            'voxel_grid_size': LaunchConfiguration('voxel_grid_size'),
             'pca_max_linearity': LaunchConfiguration('pca_max_linearity'),
             'pca_min_scatter': LaunchConfiguration('pca_min_scatter'),
+            'rule_dynamic_width_decay': LaunchConfiguration('rule_dynamic_width_decay'),
+            'rule_min_points_at_10m': LaunchConfiguration('rule_min_points_at_10m'),
+            'use_deskewing': LaunchConfiguration('use_deskewing'),
+            'imu_topic': LaunchConfiguration('imu_topic'),
             'use_voxel_filter': LaunchConfiguration('use_voxel_filter'),
             'voxel_size': LaunchConfiguration('voxel_size'),
-            'use_deskewing': LaunchConfiguration('use_deskewing'),
-            'imu_topic': LaunchConfiguration('imu_topic')
         }]
     )
 
@@ -126,19 +108,31 @@ def generate_launch_description():
 
     return LaunchDescription([
         bag_arg,
-        clusterer_arg,
-        ground_remover_arg,
-        estimator_arg,
-        dynamic_width_decay_arg,
-                min_points_at_10m_arg,
-                pca_max_linearity_arg,
-                pca_min_scatter_arg,
-                use_voxel_filter_arg,
-                voxel_size_arg,
-                use_deskewing_arg,
-                imu_topic_arg,
-                perception_node,
-                foxglove_node,
-                play_bag
-            ])
+        cl_algo_arg,
+        gr_type_arg,
+        est_type_arg,
+        sensor_z_arg,
+        max_range_arg,
+        min_cluster_arg,
+        max_cluster_arg,
+        bin_thr_arg,
+        bin_cutoff_arg,
+        slope_max_arg,
+        pw_iter_arg,
+        pw_dist_arg,
+        euc_tol_arg,
+        db_eps_arg,
+        vox_grid_arg,
+        pca_lin_arg,
+        pca_scat_arg,
+        rule_decay_arg,
+        rule_pts_arg,
+        use_deskew_arg,
+        imu_topic_arg,
+        use_vox_filt_arg,
+        vox_size_arg,
+        perception_node,
+        foxglove_node,
+        play_bag
+    ])
         

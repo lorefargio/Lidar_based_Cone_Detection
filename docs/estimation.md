@@ -36,19 +36,13 @@ La PCA è la nostra arma "state-of-the-art" per la classificazione leggera. Calc
 
 | Parametro | Descrizione | Influenza sulla Variazione |
 | :--- | :--- | :--- |
-| `min_height` / `max_height` | Limiti in Z del cono (0.15m - 0.35m). | Fondamentale per scartare piccoli detriti o persone alte. |
-| `min_points_at_10m` | Punti minimi attesi a 10 metri. | Parametro chiave per il richiamo (Recall). Se troppo alto, i coni lontani spariscono. |
-| `dynamic_width_decay` | Riduzione della larghezza minima con $r$. | Compensa la divergenza dei raggi del LiDAR a lunga distanza. |
+| `rule_min_height` / `rule_max_height` | Limiti in Z del cono (m). | Fondamentale per scartare piccoli detriti o persone alte. |
+| `rule_min_points_at_10m` | Punti minimi attesi a 10 metri. | Parametro chiave per il richiamo (Recall). Se troppo alto, i coni lontani spariscono. |
+| `rule_dynamic_width_decay` | Riduzione della larghezza minima con $r$. | Compensa la divergenza dei raggi del LiDAR a lunga distanza. |
 | `pca_max_linearity` | Soglia per scartare oggetti lineari. | Più bassa è, più rigido è lo scarto delle gambe o paletti. |
-| `pca_min_scatter` | Soglia per assicurare tridimensionalità. | Se troppo alta, scarta coni visti da pochi angoli (es. coni laterali). |
-| `min_inlier_ratio` | (RANSAC) % punti sul cilindro. | Definisce la confidenza del fitting geometrico. |
+| `pca_min_scatter` | Soglia per assicurare tridimensionalità. | Se troppo alta, scarta coni visti da pochi angoli. |
+| `ransac_min_inlier_ratio` | (RANSAC) % punti sul cilindro. | Definisce la confidenza del fitting geometrico. |
 
 ---
 
-## 4. Confronto Tecnico
 
-| Algoritmo | Velocità | Precisione | Robustezza Rumore |
-| :--- | :--- | :--- | :--- |
-| **Rule-Based** | ⭐⭐⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐ |
-| **Rule-Based + PCA** | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐ |
-| **Model Fitting (RANSAC)** | ⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐ |

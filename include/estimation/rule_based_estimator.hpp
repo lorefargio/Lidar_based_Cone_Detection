@@ -19,6 +19,7 @@ public:
      * @brief Parameters governing the rule-based classification logic.
      */
     struct Config {
+        float ground_z_level = -0.52f;      ///< Estimated ground level (m) to calculate object height.
         float dynamic_width_decay = 0.005f; ///< Decrement for minimum width threshold per meter.
         int min_points_at_10m = 10;         ///< Minimum points expected for a cone at 10 meters distance.
         
