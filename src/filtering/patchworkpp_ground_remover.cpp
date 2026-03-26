@@ -37,13 +37,13 @@ void PatchworkppGroundRemover::removeGround(const PointCloudConstPtr& cloud_in,
     nonground_pts_ = patchwork_ptr_->getNonground();
 
     // 4. Popolamento rapido
-    auto populate = [&](const Eigen::MatrixX3f& src, PointCloudPtr& dst, float intensity_val) {
+    auto populate = [&](const Eigen::MatrixX3f& src, PointCloudPtr& dst) {
         dst->points.clear();
         dst->points.reserve(src.rows());
         for (int i = 0; i < src.rows(); ++i) {
             PointT p;
             p.x = src(i, 0); p.y = src(i, 1); p.z = src(i, 2);
-            p.intensity = intensity_val;
+            p.intensity = src(i,3);
             dst->push_back(p);
         }
         dst->width = dst->points.size();
@@ -52,8 +52,8 @@ void PatchworkppGroundRemover::removeGround(const PointCloudConstPtr& cloud_in,
         dst->header = cloud_in->header;
     };
 
-    populate(ground_pts_, cloud_ground, 1.0f);
-    populate(nonground_pts_, cloud_obstacles, 0.0f);
+    populate(ground_pts_, cloud_ground);
+    populate(nonground_pts_, cloud_obstacles);
 }
 
 } // namespace fs_perception

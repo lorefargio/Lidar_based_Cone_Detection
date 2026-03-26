@@ -65,7 +65,7 @@ public:
         this->declare_parameter<std::string>("log_dir", "log_profiler/");
         
         // Common geometric/filtering parameters
-        this->declare_parameter<double>("sensor_z", -0.52);
+        this->declare_parameter<double>("sensor_z", -0.50);
         this->declare_parameter<double>("max_range", 25.0);
         this->declare_parameter<int>("min_cluster_size", 3);
         this->declare_parameter<int>("max_cluster_size", 300);
@@ -354,6 +354,8 @@ private:
         ground_remover_->removeGround(raw_cloud, obstacles_str_, ground_str_);
         
         if (this->get_parameter("use_voxel_filter").as_bool()) {
+            RCLCPP_INFO(this->get_logger(), "Voxel filter actiavted");
+            
             double leaf_size = this->get_parameter("voxel_size").as_double();
             
             // Safety Check: Leaf size cannot be smaller than 0.01m to avoid memory explosion

@@ -9,7 +9,7 @@ namespace fs_perception {
 
 class PatchworkppGroundRemover : public GroundRemoverInterface {
 public:
-    EIGEN_MAKE_ALIGNED_OPERATOR_NEW // Fondamentale!
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
     explicit PatchworkppGroundRemover(const patchwork::Params& params);
     
     void removeGround(const PointCloudConstPtr& cloud_in, 

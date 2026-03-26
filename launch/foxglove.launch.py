@@ -13,7 +13,7 @@ def generate_launch_description():
     est_type_arg = DeclareLaunchArgument('estimator_type', default_value='rule_based', description='Algorithm: rule_based, ransac')
     
     # --- 2. COMMON PARAMETERS ---
-    sensor_z_arg = DeclareLaunchArgument('sensor_z', default_value='-0.52', description='Lidar height from ground')
+    sensor_z_arg = DeclareLaunchArgument('sensor_z', default_value='-0.50', description='Lidar height from ground')
     max_range_arg = DeclareLaunchArgument('max_range', default_value='25.0', description='Max processing range')
     min_cluster_arg = DeclareLaunchArgument('min_cluster_size', default_value='3', description='Min points per cluster')
     max_cluster_arg = DeclareLaunchArgument('max_cluster_size', default_value='300', description='Max points per cluster')

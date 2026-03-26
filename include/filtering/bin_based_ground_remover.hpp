@@ -21,7 +21,7 @@ public:
      */
     struct Config {
         float max_range = 25.0f;           ///< Maximum radial distance for processing.
-        float sensor_z = -0.42f;           ///< Height of the sensor from the ground (meters).
+        float sensor_z = -0.50f;           ///< Height of the sensor from the ground (meters).
         float hard_ground_cutoff = -0.47f; ///< Absolute height cutoff (all points below are ground).
         float local_threshold = 0.02f;     ///< Maximum height difference from the local minimum to consider a point ground.
         int segments = 500;                ///< Number of radial angular segments.

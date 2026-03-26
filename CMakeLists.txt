@@ -18,7 +18,7 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
   add_compile_options(
     -Wall -Wextra -Wpedantic
     -O3
-    -march=native   # Manteniamo questo, MA dobbiamo usarlo ovunque
+    -march=native   
     -DNDEBUG
   )
 endif()
