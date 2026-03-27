@@ -17,8 +17,7 @@
 #include "clustering/dbscan_clusterer.hpp"
 #include "clustering/adaptive_dbscan_clusterer.hpp"
 #include "clustering/voxel_connected_components.hpp"
-#include "estimation/rule_based_estimator.hpp"
-#include "estimation/model_fitting_estimator.hpp"
+#include "estimation/cone_estimator.hpp"
 
 using namespace std::chrono_literals;
 
@@ -108,6 +107,21 @@ LidarPerceptionNode::LidarPerceptionNode() : Node("lidar_perception_node") {
         RCLCPP_INFO(this->get_logger(), "Ground Removal: PATCHWORK++");
     }
 
+    // Configure Modular Voxel Filter in Ground Remover
+    this->declare_parameter<bool>("use_voxel_filter", false);
+    this->declare_parameter<double>("voxel_size", 0.09); // Recommended for older hardware
+
+    if (this->get_parameter("use_voxel_filter").as_bool() && ground_remover_) {
+        double leaf_size = this->get_parameter("voxel_size").as_double();
+        
+        // Safety check for memory limits on older hardware
+        if (leaf_size < 0.05) {
+            RCLCPP_WARN(this->get_logger(), "Voxel size %.2f might cause memory issues on this PC. Using 0.09m is safer.", leaf_size);
+        }
+        
+        ground_remover_->setVoxelFilter(static_cast<float>(leaf_size));
+    }
+
     // --- 3. CLUSTERING CONFIGURATION ---
     std::string cl_algo = this->get_parameter("clustering_algorithm").as_string();
     int min_cluster = this->get_parameter("min_cluster_size").as_int();
@@ -157,61 +171,34 @@ LidarPerceptionNode::LidarPerceptionNode() : Node("lidar_perception_node") {
     }
 
     // --- 4. ESTIMATION CONFIGURATION ---
-    std::string est_type = this->get_parameter("estimator_type").as_string();
-    
-    // PCA Params (shared between estimators)
+    // PCA Params
     this->declare_parameter<double>("pca_max_linearity", 0.8);
     this->declare_parameter<double>("pca_max_planarity", 0.8);
     this->declare_parameter<double>("pca_min_scatter", 0.02);
     
-    float max_lin = static_cast<float>(this->get_parameter("pca_max_linearity").as_double());
-    float max_plan = static_cast<float>(this->get_parameter("pca_max_planarity").as_double());
-    float min_scat = static_cast<float>(this->get_parameter("pca_min_scatter").as_double());
+    ConeEstimator::Config est_cfg;
+    this->declare_parameter<double>("rule_min_height", 0.10);
+    this->declare_parameter<double>("rule_max_height", 0.50);
+    this->declare_parameter<double>("rule_base_min_width", 0.10);
+    this->declare_parameter<double>("rule_max_width", 0.36);
+    this->declare_parameter<double>("rule_dynamic_width_decay", 0.005);
+    this->declare_parameter<int>("rule_min_points_at_10m", 10);
+    this->declare_parameter<double>("rule_min_intensity", 5.0);
+    
+    est_cfg.min_height = static_cast<float>(this->get_parameter("rule_min_height").as_double());
+    est_cfg.max_height = static_cast<float>(this->get_parameter("rule_max_height").as_double());
+    est_cfg.base_min_width = static_cast<float>(this->get_parameter("rule_base_min_width").as_double());
+    est_cfg.max_width = static_cast<float>(this->get_parameter("rule_max_width").as_double());
+    est_cfg.dynamic_width_decay = static_cast<float>(this->get_parameter("rule_dynamic_width_decay").as_double());
+    est_cfg.min_points_at_10m = this->get_parameter("rule_min_points_at_10m").as_int();
+    est_cfg.min_intensity = static_cast<float>(this->get_parameter("rule_min_intensity").as_double());
+    est_cfg.max_linearity = static_cast<float>(this->get_parameter("pca_max_linearity").as_double());
+    est_cfg.max_planarity = static_cast<float>(this->get_parameter("pca_max_planarity").as_double());
+    est_cfg.min_scatter = static_cast<float>(this->get_parameter("pca_min_scatter").as_double());
+    est_cfg.ground_z_level = sensor_z;
 
-    if (est_type == "rule_based") {
-        RuleBasedEstimator::Config cfg;
-        this->declare_parameter<double>("rule_min_height", 0.10);
-        this->declare_parameter<double>("rule_max_height", 0.50);
-        this->declare_parameter<double>("rule_base_min_width", 0.10);
-        this->declare_parameter<double>("rule_max_width", 0.36);
-        this->declare_parameter<double>("rule_dynamic_width_decay", 0.005);
-        this->declare_parameter<int>("rule_min_points_at_10m", 10);
-        this->declare_parameter<double>("rule_min_intensity", 5.0);
-        
-        cfg.min_height = static_cast<float>(this->get_parameter("rule_min_height").as_double());
-        cfg.max_height = static_cast<float>(this->get_parameter("rule_max_height").as_double());
-        cfg.base_min_width = static_cast<float>(this->get_parameter("rule_base_min_width").as_double());
-        cfg.max_width = static_cast<float>(this->get_parameter("rule_max_width").as_double());
-        cfg.dynamic_width_decay = static_cast<float>(this->get_parameter("rule_dynamic_width_decay").as_double());
-        cfg.min_points_at_10m = this->get_parameter("rule_min_points_at_10m").as_int();
-        cfg.min_intensity = static_cast<float>(this->get_parameter("rule_min_intensity").as_double());
-        cfg.max_linearity = max_lin;
-        cfg.max_planarity = max_plan;
-        cfg.min_scatter = min_scat;
-        cfg.ground_z_level = sensor_z;
-
-        estimator_ = std::make_unique<RuleBasedEstimator>(cfg);
-        RCLCPP_INFO(this->get_logger(), "Estimator: RULE-BASED");
-    } else if (est_type == "ransac") {
-        ModelFittingEstimator::Config cfg;
-        this->declare_parameter<double>("ransac_dist_threshold", 0.05);
-        this->declare_parameter<int>("ransac_max_iter", 1000);
-        this->declare_parameter<double>("ransac_radius_min", 0.05);
-        this->declare_parameter<double>("ransac_radius_max", 0.18);
-        this->declare_parameter<double>("ransac_min_inlier_ratio", 0.4);
-
-        cfg.distance_threshold = static_cast<float>(this->get_parameter("ransac_dist_threshold").as_double());
-        cfg.max_iterations = this->get_parameter("ransac_max_iter").as_int();
-        cfg.radius_min = static_cast<float>(this->get_parameter("ransac_radius_min").as_double());
-        cfg.radius_max = static_cast<float>(this->get_parameter("ransac_radius_max").as_double());
-        cfg.min_inlier_ratio = static_cast<float>(this->get_parameter("ransac_min_inlier_ratio").as_double());
-        cfg.max_linearity = max_lin;
-        cfg.min_scatter = min_scat;
-        cfg.ground_z_level = sensor_z;
-
-        estimator_ = std::make_unique<ModelFittingEstimator>(cfg);
-        RCLCPP_INFO(this->get_logger(), "Estimator: RANSAC");
-    }
+    estimator_ = std::make_unique<ConeEstimator>(est_cfg);
+    RCLCPP_INFO(this->get_logger(), "Estimator: CONSOLIDATED CONE-ESTIMATOR");
 
     // --- 5. DESKEWING CONFIGURATION ---
     this->declare_parameter<bool>("use_deskewing", true);
@@ -233,9 +220,6 @@ LidarPerceptionNode::LidarPerceptionNode() : Node("lidar_perception_node") {
     }
 
     // --- 6. POST-PROCESSING & BENCHMARKING ---
-    this->declare_parameter<bool>("use_voxel_filter", false);
-    this->declare_parameter<double>("voxel_size", 0.05);
-    
     std::string log_dir = this->get_parameter("log_dir").as_string();
     if (!log_dir.empty() && log_dir.back() != '/') log_dir += '/';
     std::filesystem::create_directories(log_dir); 
@@ -317,27 +301,6 @@ void LidarPerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPt
 
     ground_remover_->removeGround(raw_cloud, obstacles_str_, ground_str_);
     
-    if (this->get_parameter("use_voxel_filter").as_bool()) {
-        
-        double leaf_size = this->get_parameter("voxel_size").as_double();
-        
-        // Safety Check: Leaf size cannot be smaller than 0.05m to avoid memory explosion
-        if (leaf_size < 0.5) leaf_size = 0.5;
-
-        pcl::VoxelGrid<PointT> voxel_grid;
-        voxel_grid.setInputCloud(obstacles_str_);
-        voxel_grid.setLeafSize(leaf_size, leaf_size, leaf_size);
-        
-        PointCloudPtr filtered_obstacles(new PointCloud);
-        try {
-            voxel_grid.filter(*filtered_obstacles);
-            obstacles_str_ = filtered_obstacles;
-        } catch (const std::exception& e) {
-            RCLCPP_ERROR(this->get_logger(), "VoxelGrid failed: %s", e.what());
-        }
-    }
-   
-
     // Publish debug ground clouds
     sensor_msgs::msg::PointCloud2 ground_msg;
     pcl::toROSMsg(*ground_str_, ground_msg);

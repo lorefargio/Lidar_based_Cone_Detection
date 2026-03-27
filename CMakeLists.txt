@@ -53,8 +53,7 @@ add_executable(perception_node
   src/clustering/dbscan_clusterer.cpp
   src/clustering/adaptive_dbscan_clusterer.cpp
   src/clustering/voxel_connected_components.cpp
-  src/estimation/rule_based_estimator.cpp
-  src/estimation/model_fitting_estimator.cpp
+  src/estimation/cone_estimator.cpp
   src/utils/performance_profiler.cpp
   src/utils/deskewer.cpp
 )
@@ -96,14 +95,14 @@ endif()
 
 # --- 9. INTERPROCEDURAL OPTIMIZATION (IPO/LTO) ---
 # Enables cross-file inlining and advanced linker optimizations.
-# include(CheckIPOSupported)
-# check_ipo_supported(RESULT result OUTPUT output)
-# if(result)
-#   set_property(TARGET perception_node PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
-#   message(STATUS "IPO/LTO enabled for perception_node")
-# else()
-#   message(WARNING "IPO/LTO not supported: ${output}")
-# endif()
+include(CheckIPOSupported)
+check_ipo_supported(RESULT result OUTPUT output)
+if(result)
+  set_property(TARGET perception_node PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+  message(STATUS "IPO/LTO enabled for perception_node")
+else()
+  message(WARNING "IPO/LTO not supported: ${output}")
+endif()
 
 # --- 10. INSTALLATION ---
 install(TARGETS perception_node

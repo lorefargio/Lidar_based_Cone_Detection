@@ -10,7 +10,6 @@ def generate_launch_description():
     bag_arg = DeclareLaunchArgument('bag', default_value='', description='Path to rosbag to play')
     cl_algo_arg = DeclareLaunchArgument('clustering_algorithm', default_value='grid', description='Algorithm: grid, euclidean, string, dbscan, hdbscan, voxel')
     gr_type_arg = DeclareLaunchArgument('ground_remover_type', default_value='slope_based', description='Algorithm: bin_based, slope_based, patchworkpp')
-    est_type_arg = DeclareLaunchArgument('estimator_type', default_value='rule_based', description='Algorithm: rule_based, ransac')
     
     # --- 2. COMMON PARAMETERS ---
     sensor_z_arg = DeclareLaunchArgument('sensor_z', default_value='-0.50', description='Lidar height from ground')
@@ -59,7 +58,6 @@ def generate_launch_description():
             'bag_path': LaunchConfiguration('bag'),
             'clustering_algorithm': LaunchConfiguration('clustering_algorithm'),
             'ground_remover_type': LaunchConfiguration('ground_remover_type'),
-            'estimator_type': LaunchConfiguration('estimator_type'),
             'sensor_z': LaunchConfiguration('sensor_z'),
             'max_range': LaunchConfiguration('max_range'),
             'min_cluster_size': LaunchConfiguration('min_cluster_size'),
@@ -112,7 +110,6 @@ def generate_launch_description():
         bag_arg,
         cl_algo_arg,
         gr_type_arg,
-        est_type_arg,
         sensor_z_arg,
         max_range_arg,
         min_cluster_arg,

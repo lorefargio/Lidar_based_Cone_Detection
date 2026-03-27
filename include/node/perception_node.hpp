@@ -14,7 +14,7 @@
 #include "utils/types.hpp"
 #include "filtering/ground_remover_interface.hpp"
 #include "clustering/clusterer_interface.hpp"
-#include "estimation/estimator_interface.hpp"
+#include "estimation/cone_estimator.hpp"
 #include "utils/performance_profiler.hpp"
 #include "utils/deskewer.hpp"
 
@@ -65,7 +65,7 @@ private:
     PointCloudPtr ground_str_{new PointCloud};
     std::unique_ptr<GroundRemoverInterface> ground_remover_;
     std::unique_ptr<ClustererInterface> clusterer_;
-    std::unique_ptr<EstimatorInterface> estimator_;
+    std::unique_ptr<ConeEstimator> estimator_;
     std::unique_ptr<Deskewer> deskewer_;
     
     // Benchmarking and logging tools

@@ -1,4 +1,4 @@
-#include "estimation/rule_based_estimator.hpp"
+#include "estimation/cone_estimator.hpp"
 #include <pcl/common/centroid.h>
 #include <pcl/common/common.h>
 #include <pcl/common/pca.h>
@@ -12,11 +12,11 @@
 
 namespace fs_perception {
 
-RuleBasedEstimator::RuleBasedEstimator() : config_(Config()) {}
+ConeEstimator::ConeEstimator() : config_(Config()) {}
 
-RuleBasedEstimator::RuleBasedEstimator(const Config& config) : config_(config) {}
+ConeEstimator::ConeEstimator(const Config& config) : config_(config) {}
 
-Cone RuleBasedEstimator::estimate(const PointCloudPtr& cluster) {
+Cone ConeEstimator::estimate(const PointCloudPtr& cluster) {
     Cone cone;
     cone.color = ConeColor::UNKNOWN; 
     cone.confidence = 0.0f;
@@ -51,6 +51,7 @@ Cone RuleBasedEstimator::estimate(const PointCloudPtr& cluster) {
     pcl::PCA<PointT> pca;
     pca.setInputCloud(cluster);
     Eigen::Vector3f eigenvalues = pca.getEigenValues().head<3>();
+    Eigen::Matrix3f eigenvectors = pca.getEigenVectors();
     
     float l1 = eigenvalues[0];
     float l2 = eigenvalues[1];
@@ -67,6 +68,13 @@ Cone RuleBasedEstimator::estimate(const PointCloudPtr& cluster) {
 
     // Shape-based filter to reject poles, legs, and walls
     if (linearity > config_.max_linearity || planarity > config_.max_planarity || scattering < config_.min_scatter) {
+        return cone;
+    }
+
+    // Verticality Check: The first principal component (eigenvector) of a cone should be roughly vertical (Z-axis)
+    // We check the absolute Z-component of the first eigenvector.
+    float verticality = std::abs(eigenvectors(2, 0)); // Z-component of the primary axis
+    if (verticality < 0.6f) { // If the main axis is more horizontal than vertical
         return cone;
     }
 
@@ -97,7 +105,6 @@ Cone RuleBasedEstimator::estimate(const PointCloudPtr& cluster) {
     dynamic_min_width = std::max(0.02f, dynamic_min_width); // Safety lower bound
 
     // Apply rule thresholds
-    if (avg_intensity < config_.min_intensity) return cone; 
     if (cone.height < config_.min_height || cone.height > config_.max_height) return cone;
     if (max_width < dynamic_min_width || max_width > config_.max_width) return cone;
     if (aspect_ratio < config_.min_aspect_ratio || aspect_ratio > config_.max_aspect_ratio) return cone;

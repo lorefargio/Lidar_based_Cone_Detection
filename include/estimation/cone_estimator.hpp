@@ -1,18 +1,18 @@
 #pragma once
 
-#include "estimation/estimator_interface.hpp"
+#include "utils/types.hpp"
 
 namespace fs_perception {
 
 /**
- * @class RuleBasedEstimator
+ * @class ConeEstimator
  * @brief Classifies cones based on a set of geometric and statistical rules.
  * 
  * This estimator evaluates candidates using bounding box size, aspect ratio, 
  * PCA-based shape features (Linearity, Planarity, Scattering), and intensity 
  * with dynamic thresholds that adapt to the object's distance from the sensor.
  */
-class RuleBasedEstimator : public EstimatorInterface {
+class ConeEstimator {
 public:
     /**
      * @struct Config
@@ -39,22 +39,22 @@ public:
     };
 
     /**
-     * @brief Default constructor for RuleBasedEstimator.
+     * @brief Default constructor for ConeEstimator.
      */
-    RuleBasedEstimator();
+    ConeEstimator();
 
     /**
      * @brief Explicit constructor with custom configuration.
      * @param config The custom configuration struct.
      */
-    explicit RuleBasedEstimator(const Config& config);
+    explicit ConeEstimator(const Config& config);
 
     /**
      * @brief Estimates whether a cluster is a cone using static and dynamic geometric rules.
      * @param cluster Point cloud of a single candidate object.
      * @return Cone structure with pose and binary confidence (1.0 if accepted, 0.0 if rejected).
      */
-    Cone estimate(const PointCloudPtr& cluster) override;
+    Cone estimate(const PointCloudPtr& cluster);
 
 private:
     Config config_; ///< Current configuration parameters.

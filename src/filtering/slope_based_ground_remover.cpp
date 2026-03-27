@@ -1,6 +1,7 @@
 #include "filtering/slope_based_ground_remover.hpp"
 #include <algorithm>
 #include <vector>
+#include <pcl/filters/voxel_grid.h>
 
 namespace fs_perception {
 
@@ -89,6 +90,16 @@ void SlopeBasedGroundRemover::removeGround(const PointCloudConstPtr& cloud_in, P
                 cloud_obstacles->push_back(pt);
             }
         }
+    }
+
+    // Apply voxel filter to obstacles if enabled
+    if (voxel_size_ > 0.001f) {
+        pcl::VoxelGrid<PointT> voxel_grid;
+        voxel_grid.setInputCloud(cloud_obstacles);
+        voxel_grid.setLeafSize(voxel_size_, voxel_size_, voxel_size_);
+        PointCloudPtr filtered(new PointCloud);
+        voxel_grid.filter(*filtered);
+        *cloud_obstacles = *filtered;
     }
 }
 
