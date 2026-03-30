@@ -93,24 +93,37 @@ def plot_stacked_bar(df):
     """
     Generates a stacked bar chart showing the breakdown of time spent in each pipeline phase.
     """
-    # Calculate average time per phase per algorithm
-    avg_times = df.groupby('algorithm')[['ground_removal_ms', 'clustering_ms', 'estimation_ms']].mean().reset_index()
+    # Define all phases to be plotted
+    phases = [
+        'conversion_ms', 'deskewing_ms', 'ground_removal_ms', 
+        'clustering_ms', 'merging_ms', 'estimation_ms', 'duplicate_ms'
+    ]
     
-    fig, ax = plt.subplots(figsize=(10, 6))
+    # Filter only available phases in the dataframe
+    available_phases = [p for p in phases if p in df.columns]
+    
+    # Calculate average time per phase per algorithm
+    avg_times = df.groupby('algorithm')[available_phases].mean().reset_index()
+    
+    fig, ax = plt.subplots(figsize=(12, 7))
     
     bottom = np.zeros(len(avg_times))
-    colors = ['#4c72b0', '#55a868', '#c44e52']
-    labels = ['Ground Removal', 'Clustering', 'Estimation']
-    columns = ['ground_removal_ms', 'clustering_ms', 'estimation_ms']
+    # Use a larger color palette for more phases
+    colors = sns.color_palette("husl", len(available_phases))
     
-    for col, color, label in zip(columns, colors, labels):
+    for col, color in zip(available_phases, colors):
+        label = col.replace('_ms', '').replace('_', ' ').capitalize()
         ax.bar(avg_times['algorithm'], avg_times[col], bottom=bottom, label=label, color=color, width=0.6)
         bottom += avg_times[col].values
         
-    plt.title("Mean Execution Time Breakdown", fontsize=14, pad=15)
+    plt.title("Mean Execution Time Breakdown (Full Pipeline)", fontsize=14, pad=15)
     plt.ylabel("Time (ms)", fontsize=12)
     plt.xlabel("Algorithm", fontsize=12)
-    plt.legend(title="Pipeline Phases")
+    plt.legend(title="Pipeline Phases", bbox_to_anchor=(1.05, 1), loc='upper left')
+    
+    # Target 20Hz limit line
+    ax.axhline(50, color='red', linestyle=':', alpha=0.5, label='20Hz Budget')
+    
     plt.tight_layout()
     plt.savefig(os.path.join(FIGURES_DIR, "latency_breakdown_stacked.png"), dpi=300)
     plt.close()
