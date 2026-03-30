@@ -292,8 +292,25 @@ void LidarPerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPt
         return;
     }
 
-    // Phase 1.05: Pre-processing (Truncation and Sanitization)
+    // Phase 1.05: Pre-processing (Truncation FIRST, then Voxel Filter)
+    if (profiler_) profiler_->startTimer("conversion"); 
+
+    // 1. Truncate points beyond max_range and handle NaNs
+    // This prevents VoxelGrid overflow by removing outliers at infinity
     preProcess(raw_cloud_ptr_);
+
+    // 2. Early downsampling on a clean, bounded cloud
+    if (raw_cloud_ptr_->size() > 500) {
+        pcl::VoxelGrid<PointT> early_vg;
+        early_vg.setInputCloud(raw_cloud_ptr_);
+        early_vg.setLeafSize(0.05f, 0.05f, 0.05f); // 5cm voxel
+        PointCloudPtr filtered(new PointCloud);
+        early_vg.filter(*filtered);
+        *raw_cloud_ptr_ = *filtered;
+    }
+
+    if (profiler_) profiler_->stopTimer("conversion");
+
     if (raw_cloud_ptr_->empty()) return;
 
     // Phase 1.1: Lidar Deskewing
@@ -318,21 +335,14 @@ void LidarPerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPt
 
     if (profiler_) profiler_->stopTimer("ground_removal");
     
-    
     // Publish debug ground clouds only at the specified frequency to save bandwidth
     if (frame_counter_ % this->get_parameter("debug_pub_freq").as_int() == 0) {
-        // sensor_msgs::msg::PointCloud2 ground_msg;
-        // pcl::toROSMsg(*ground_str_, ground_msg);
-        // ground_msg.header = msg->header;
-        // pub_ground_->publish(ground_msg);
-
         sensor_msgs::msg::PointCloud2 no_ground_msg;
         pcl::toROSMsg(*obstacles_str_, no_ground_msg);
         no_ground_msg.header = msg->header;
-        pub_no_ground_->publish(no_ground_msg);
+        pub_no_ground_->publish(std::move(no_ground_msg));
     }
     
-
     // Phase 3: Object Clustering
     if (!clusterer_) {
         RCLCPP_ERROR_ONCE(this->get_logger(), "Clusterer not initialized!");
@@ -347,27 +357,36 @@ void LidarPerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPt
     // Phase 3.1: Proximity-based Cluster Merging to handle over-segmented objects
     if (profiler_) profiler_->startTimer("merging");
     std::vector<PointCloudPtr> merged_clusters;
-    std::vector<bool> merged_flag(clusters.size(), false);
+    
+    // Pre-filter noise clusters to reduce K in the O(K^2) loop
+    std::vector<PointCloudPtr> valid_candidates;
+    for (auto& c : clusters) {
+        if (c->size() >= 3) {
+            valid_candidates.push_back(c);
+        }
+    }
+
+    std::vector<bool> merged_flag(valid_candidates.size(), false);
     
     // Centroids with aligned_allocator for Eigen SSE compatibility
-    std::vector<Eigen::Vector4f, Eigen::aligned_allocator<Eigen::Vector4f>> centroids(clusters.size());
+    std::vector<Eigen::Vector4f, Eigen::aligned_allocator<Eigen::Vector4f>> centroids(valid_candidates.size());
     
-    for(size_t i = 0; i < clusters.size(); ++i) {
-        pcl::compute3DCentroid(*clusters[i], centroids[i]);
+    for(size_t i = 0; i < valid_candidates.size(); ++i) {
+        pcl::compute3DCentroid(*valid_candidates[i], centroids[i]);
     }
 
     const float MERGE_DIST_SQ = 0.25f * 0.25f; // 25cm distance for merging clusters
-    for (size_t i = 0; i < clusters.size(); ++i) {
+    for (size_t i = 0; i < valid_candidates.size(); ++i) {
         if (merged_flag[i]) continue;
-        PointCloudPtr super_cluster(new PointCloud(*clusters[i]));
+        PointCloudPtr super_cluster(new PointCloud(*valid_candidates[i]));
 
-        for (size_t j = i + 1; j < clusters.size(); ++j) {
+        for (size_t j = i + 1; j < valid_candidates.size(); ++j) {
             if (merged_flag[j]) continue;
             float dx = centroids[i][0] - centroids[j][0];
             float dy = centroids[i][1] - centroids[j][1];
 
             if (dx*dx + dy*dy < MERGE_DIST_SQ) {
-                *super_cluster += *clusters[j];
+                *super_cluster += *valid_candidates[j];
                 merged_flag[j] = true; 
             }
         }

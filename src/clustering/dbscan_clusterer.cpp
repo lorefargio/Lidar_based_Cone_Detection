@@ -14,67 +14,66 @@ void DBSCANClusterer::cluster(const PointCloudPtr& cloud, std::vector<PointCloud
     const int n_points = static_cast<int>(cloud->size());
     const float inv_eps = 1.0f / eps_;
     
-    // Spatial Hash Grid for O(1) neighbor lookup
-    struct GridKey {
-        int x, y, z;
-        bool operator==(const GridKey& other) const {
-            return x == other.x && y == other.y && z == other.z;
-        }
-    };
-    struct GridKeyHasher {
-        std::size_t operator()(const GridKey& k) const {
-            return ((std::hash<int>()(k.x) ^ (std::hash<int>()(k.y) << 1)) >> 1) ^ (std::hash<int>()(k.z) << 1);
-        }
+    // Define a constrained 3D volume for the flat grid (+/- 30m XY, +/- 2m Z)
+    const float range_xy = 30.0f;
+    const float range_z = 2.0f;
+    const int dim_xy = static_cast<int>(2.0f * range_xy * inv_eps) + 1;
+    const int dim_z = static_cast<int>(2.0f * range_z * inv_eps) + 1;
+
+    // Pre-allocated flat grid (vector of vectors)
+    // idx = (x * dim_y * dim_z) + (y * dim_z) + z
+    std::vector<std::vector<int>> grid(dim_xy * dim_xy * dim_z);
+
+    auto get_idx = [&](float x, float y, float z) {
+        int gx = static_cast<int>((x + range_xy) * inv_eps);
+        int gy = static_cast<int>((y + range_xy) * inv_eps);
+        int gz = static_cast<int>((z + range_z) * inv_eps);
+        if (gx < 0 || gx >= dim_xy || gy < 0 || gy >= dim_xy || gz < 0 || gz >= dim_z) return -1;
+        return (gx * dim_xy * dim_z) + (gy * dim_z) + gz;
     };
 
-    std::unordered_map<GridKey, std::vector<int>, GridKeyHasher> grid;
-    grid.reserve(n_points);
-
+    // Phase 1: Grid Population
     for (int i = 0; i < n_points; ++i) {
-        const auto& pt = cloud->points[i];
-        GridKey key{
-            static_cast<int>(std::floor(pt.x * inv_eps)),
-            static_cast<int>(static_cast<int>(std::floor(pt.y * inv_eps))),
-            static_cast<int>(static_cast<int>(std::floor(pt.z * inv_eps)))
-        };
-        grid[key].push_back(i);
+        int idx = get_idx(cloud->points[i].x, cloud->points[i].y, cloud->points[i].z);
+        if (idx != -1) grid[idx].push_back(i);
     }
 
-    std::vector<int> labels(n_points, -1); // -1: unvisited, -2: noise, >=0: cluster_id
+    std::vector<int> labels(n_points, -1); 
     int current_cluster_id = 0;
-    
-    std::vector<int> neighbor_indices;
-    neighbor_indices.reserve(100);
     std::queue<int> seed_queue;
-
     const float eps_sq = eps_ * eps_;
 
     auto get_neighbors = [&](int idx, std::vector<int>& neighbors) {
         neighbors.clear();
         const auto& pt = cloud->points[idx];
-        int gx = static_cast<int>(std::floor(pt.x * inv_eps));
-        int gy = static_cast<int>(std::floor(pt.y * inv_eps));
-        int gz = static_cast<int>(std::floor(pt.z * inv_eps));
+        int gx = static_cast<int>((pt.x + range_xy) * inv_eps);
+        int gy = static_cast<int>((pt.y + range_xy) * inv_eps);
+        int gz = static_cast<int>((pt.z + range_z) * inv_eps);
 
         for (int x = gx - 1; x <= gx + 1; ++x) {
+            if (x < 0 || x >= dim_xy) continue;
             for (int y = gy - 1; y <= gy + 1; ++y) {
+                if (y < 0 || y >= dim_xy) continue;
                 for (int z = gz - 1; z <= gz + 1; ++z) {
-                    auto it = grid.find({x, y, z});
-                    if (it != grid.end()) {
-                        for (int neighbor_idx : it->second) {
-                            const auto& npt = cloud->points[neighbor_idx];
-                            float dx = pt.x - npt.x;
-                            float dy = pt.y - npt.y;
-                            float dz = pt.z - npt.z;
-                            if (dx*dx + dy*dy + dz*dz <= eps_sq) {
-                                neighbors.push_back(neighbor_idx);
-                            }
+                    if (z < 0 || z >= dim_z) continue;
+                    
+                    int g_idx = (x * dim_xy * dim_z) + (y * dim_z) + z;
+                    for (int n_idx : grid[g_idx]) {
+                        const auto& npt = cloud->points[n_idx];
+                        float dx = pt.x - npt.x;
+                        float dy = pt.y - npt.y;
+                        float dz = pt.z - npt.z;
+                        if (dx*dx + dy*dy + dz*dz <= eps_sq) {
+                            neighbors.push_back(n_idx);
                         }
                     }
                 }
             }
         }
     };
+
+    std::vector<int> neighbor_indices;
+    neighbor_indices.reserve(200);
 
     for (int i = 0; i < n_points; ++i) {
         if (labels[i] != -1) continue;
@@ -86,27 +85,26 @@ void DBSCANClusterer::cluster(const PointCloudPtr& cloud, std::vector<PointCloud
             continue;
         }
 
-        // Start new cluster
         labels[i] = current_cluster_id;
-        for (int neighbor_idx : neighbor_indices) {
-            if (labels[neighbor_idx] == -1 || labels[neighbor_idx] == -2) {
-                labels[neighbor_idx] = current_cluster_id;
-                seed_queue.push(neighbor_idx);
+        for (int n_idx : neighbor_indices) {
+            if (labels[n_idx] < 0) {
+                labels[n_idx] = current_cluster_id;
+                seed_queue.push(n_idx);
             }
         }
 
         while (!seed_queue.empty()) {
-            int curr_idx = seed_queue.front();
+            int curr = seed_queue.front();
             seed_queue.pop();
 
             std::vector<int> curr_neighbors;
-            get_neighbors(curr_idx, curr_neighbors);
+            get_neighbors(curr, curr_neighbors);
 
             if (static_cast<int>(curr_neighbors.size()) >= min_pts_) {
-                for (int neighbor_idx : curr_neighbors) {
-                    if (labels[neighbor_idx] == -1 || labels[neighbor_idx] == -2) {
-                        labels[neighbor_idx] = current_cluster_id;
-                        seed_queue.push(neighbor_idx);
+                for (int n_idx : curr_neighbors) {
+                    if (labels[n_idx] < 0) {
+                        labels[n_idx] = current_cluster_id;
+                        seed_queue.push(n_idx);
                     }
                 }
             }
@@ -114,16 +112,11 @@ void DBSCANClusterer::cluster(const PointCloudPtr& cloud, std::vector<PointCloud
         current_cluster_id++;
     }
 
-    // Convert labels to point clouds
+    // Extraction with point clouds
     std::vector<PointCloudPtr> temp_clusters(current_cluster_id);
-    for (int i = 0; i < current_cluster_id; ++i) {
-        temp_clusters[i].reset(new PointCloud);
-    }
-
+    for (int i = 0; i < current_cluster_id; ++i) temp_clusters[i].reset(new PointCloud);
     for (int i = 0; i < n_points; ++i) {
-        if (labels[i] >= 0) {
-            temp_clusters[labels[i]]->push_back(cloud->points[i]);
-        }
+        if (labels[i] >= 0) temp_clusters[labels[i]]->push_back(cloud->points[i]);
     }
 
     for (auto& c : temp_clusters) {

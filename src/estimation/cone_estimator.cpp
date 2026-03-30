@@ -26,6 +26,17 @@ Cone ConeEstimator::estimate(const PointCloudPtr& cluster) {
         return cone;
     }
 
+    // Phase 0: Bounding Box Early Exit (Fast O(N))
+    PointT min_pt, max_pt;
+    pcl::getMinMax3D(*cluster, min_pt, max_pt);
+    
+    float h = max_pt.z - config_.ground_z_level;
+    float w = std::max(max_pt.x - min_pt.x, max_pt.y - min_pt.y);
+
+    if (h < config_.min_height * 0.8f || h > config_.max_height * 1.2f || w > config_.max_width * 1.5f) {
+        return cone;
+    }
+
     // Phase 1: Feature Extraction
     ClusterFeatures features = extractFeatures(cluster);
     cone.x = features.x;

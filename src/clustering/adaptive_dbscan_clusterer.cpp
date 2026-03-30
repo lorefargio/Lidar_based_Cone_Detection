@@ -14,35 +14,29 @@ void AdaptiveDBSCANClusterer::cluster(const PointCloudPtr& cloud, std::vector<Po
 
     const int n_points = static_cast<int>(cloud->size());
     
-    // 1. Spatial Hash Grid for FAST proximity lookup
-    // Since epsilon is dynamic, we use a grid size equal to the maximum possible epsilon
-    // for the expected max_range (e.g., at 25m).
+    // 1. Flat Grid 3D for FAST proximity lookup
+    // Since epsilon is dynamic, we use a grid size based on max expected epsilon
     const float max_expected_eps = eps_base_ + alpha_ * 25.0f;
     const float inv_grid_size = 1.0f / max_expected_eps;
 
-    struct GridKey {
-        int x, y, z;
-        bool operator==(const GridKey& other) const {
-            return x == other.x && y == other.y && z == other.z;
-        }
-    };
-    struct GridKeyHasher {
-        std::size_t operator()(const GridKey& k) const {
-            return ((std::hash<int>()(k.x) ^ (std::hash<int>()(k.y) << 1)) >> 1) ^ (std::hash<int>()(k.z) << 1);
-        }
-    };
+    const float range_xy = 30.0f;
+    const float range_z = 2.0f;
+    const int dim_xy = static_cast<int>(2.0f * range_xy * inv_grid_size) + 1;
+    const int dim_z = static_cast<int>(2.0f * range_z * inv_grid_size) + 1;
 
-    std::unordered_map<GridKey, std::vector<int>, GridKeyHasher> grid;
-    grid.reserve(n_points);
+    std::vector<std::vector<int>> grid(dim_xy * dim_xy * dim_z);
+
+    auto get_grid_idx = [&](float x, float y, float z) {
+        int gx = static_cast<int>((x + range_xy) * inv_grid_size);
+        int gy = static_cast<int>((y + range_xy) * inv_grid_size);
+        int gz = static_cast<int>((z + range_z) * inv_grid_size);
+        if (gx < 0 || gx >= dim_xy || gy < 0 || gy >= dim_xy || gz < 0 || gz >= dim_z) return -1;
+        return (gx * dim_xy * dim_z) + (gy * dim_z) + gz;
+    };
 
     for (int i = 0; i < n_points; ++i) {
-        const auto& pt = cloud->points[i];
-        GridKey key{
-            static_cast<int>(std::floor(pt.x * inv_grid_size)),
-            static_cast<int>(std::floor(pt.y * inv_grid_size)),
-            static_cast<int>(std::floor(pt.z * inv_grid_size))
-        };
-        grid[key].push_back(i);
+        int idx = get_grid_idx(cloud->points[i].x, cloud->points[i].y, cloud->points[i].z);
+        if (idx != -1) grid[idx].push_back(i);
     }
 
     std::vector<int> labels(n_points, -1);
@@ -53,10 +47,7 @@ void AdaptiveDBSCANClusterer::cluster(const PointCloudPtr& cloud, std::vector<Po
     auto get_params = [&](const PointT& pt) {
         float r = std::sqrt(pt.x * pt.x + pt.y * pt.y);
         float eps = eps_base_ + alpha_ * r;
-        
-        // Far away cones have fewer points, scale min_pts down to 3 at 15m+
         int min_p = std::max(3, static_cast<int>(min_pts_ * std::exp(-0.05f * r)));
-        
         return std::make_pair(eps, min_p);
     };
 
@@ -66,25 +57,24 @@ void AdaptiveDBSCANClusterer::cluster(const PointCloudPtr& cloud, std::vector<Po
         auto [eps, min_p] = get_params(pt);
         const float eps_sq = eps * eps;
 
-        int gx = static_cast<int>(std::floor(pt.x * inv_grid_size));
-        int gy = static_cast<int>(std::floor(pt.y * inv_grid_size));
-        int gz = static_cast<int>(std::floor(pt.z * inv_grid_size));
+        int gx = static_cast<int>((pt.x + range_xy) * inv_grid_size);
+        int gy = static_cast<int>((pt.y + range_xy) * inv_grid_size);
+        int gz = static_cast<int>((pt.z + range_z) * inv_grid_size);
 
-        // We only need to check the current cell and immediate neighbors because 
-        // max_expected_eps >= current_eps.
         for (int x = gx - 1; x <= gx + 1; ++x) {
+            if (x < 0 || x >= dim_xy) continue;
             for (int y = gy - 1; y <= gy + 1; ++y) {
+                if (y < 0 || y >= dim_xy) continue;
                 for (int z = gz - 1; z <= gz + 1; ++z) {
-                    auto it = grid.find({x, y, z});
-                    if (it != grid.end()) {
-                        for (int n_idx : it->second) {
-                            const auto& npt = cloud->points[n_idx];
-                            float dx = pt.x - npt.x;
-                            float dy = pt.y - npt.y;
-                            float dz = pt.z - npt.z;
-                            if (dx*dx + dy*dy + dz*dz <= eps_sq) {
-                                neighbors.push_back(n_idx);
-                            }
+                    if (z < 0 || z >= dim_z) continue;
+                    int g_idx = (x * dim_xy * dim_z) + (y * dim_z) + z;
+                    for (int n_idx : grid[g_idx]) {
+                        const auto& npt = cloud->points[n_idx];
+                        float dx = pt.x - npt.x;
+                        float dy = pt.y - npt.y;
+                        float dz = pt.z - npt.z;
+                        if (dx*dx + dy*dy + dz*dz <= eps_sq) {
+                            neighbors.push_back(n_idx);
                         }
                     }
                 }
@@ -94,7 +84,7 @@ void AdaptiveDBSCANClusterer::cluster(const PointCloudPtr& cloud, std::vector<Po
     };
 
     std::vector<int> neighbor_indices;
-    neighbor_indices.reserve(100);
+    neighbor_indices.reserve(200);
 
     for (int i = 0; i < n_points; ++i) {
         if (labels[i] != -1) continue;
