@@ -185,7 +185,7 @@ LidarPerceptionNode::LidarPerceptionNode() : Node("lidar_perception_node") {
     this->declare_parameter<double>("rule_base_min_width", 0.10);
     this->declare_parameter<double>("rule_max_width", 0.36);
     this->declare_parameter<double>("rule_dynamic_width_decay", 0.005);
-    this->declare_parameter<int>("rule_min_points_at_10m", 10);
+    this->declare_parameter<int>("rule_min_points_at_10m", 5);
     this->declare_parameter<double>("rule_min_intensity", 5.0);
     
     est_cfg.min_height = static_cast<float>(this->get_parameter("rule_min_height").as_double());

@@ -51,9 +51,10 @@ Cone ConeEstimator::estimate(const PointCloudPtr& cluster) {
     // Phase 2: Dynamic Thresholding and Classification
     float r = features.range;
 
-    // Dynamic point count threshold
+    // Dynamic point count threshold - Adjusted for 5cm Voxel Grid
+    // At 10m, 5 points are enough. At 2m, we cap at 30 points (physical limit of 5cm voxels on a cone)
     int expected_min_points = std::max(3, static_cast<int>(config_.min_points_at_10m * (100.0f / (r*r)))); 
-    expected_min_points = std::min(150, expected_min_points);
+    expected_min_points = std::min(30, expected_min_points); // CAP at 30 due to voxelization
     
     if (features.point_count < expected_min_points) {
         return cone;

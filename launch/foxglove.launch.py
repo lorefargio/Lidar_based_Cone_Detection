@@ -40,7 +40,7 @@ def generate_launch_description():
     pca_lin_arg = DeclareLaunchArgument('pca_max_linearity', default_value='0.8')
     pca_scat_arg = DeclareLaunchArgument('pca_min_scatter', default_value='0.02')
     rule_decay_arg = DeclareLaunchArgument('rule_dynamic_width_decay', default_value='0.005')
-    rule_pts_arg = DeclareLaunchArgument('rule_min_points_at_10m', default_value='10')
+    rule_pts_arg = DeclareLaunchArgument('rule_min_points_at_10m', default_value='5')
     log_clusters_arg = DeclareLaunchArgument('log_clusters', default_value='true')
 
     # --- 6. DESKEWING & FILTERS ---
