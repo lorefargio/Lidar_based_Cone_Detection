@@ -98,6 +98,9 @@ def generate_launch_description():
             'tls': False,
             'topic_whitelist': ['.*'],
             'send_buffer_limit': 100000000,
+            'use_compression': True,
+            'max_update_ms': 33, # Max ~30Hz update rate
+            'min_qos_depth': 1,
         }]
     )
 

@@ -84,97 +84,74 @@ def plot_boxplots(df):
     plt.savefig(os.path.join(FIGURES_DIR, "latency_boxplot.png"), dpi=300)
     plt.close()
 
-def plot_stacked_bar(df):
+def generate_phase_plots(df, phase_name, output_subdir):
     """
-    Generates a stacked bar chart showing the breakdown of time spent in each pipeline phase.
+    Helper to generate all three standard plots for a specific subset of data.
     """
-    # Define all phases to be plotted
-    phases = [
-        'conversion_ms', 'deskewing_ms', 'ground_removal_ms', 
-        'clustering_ms', 'merging_ms', 'estimation_ms', 'duplicate_ms'
-    ]
+    if df.empty:
+        return
+
+    phase_dir = os.path.join(FIGURES_DIR, output_subdir)
+    os.makedirs(phase_dir, exist_ok=True)
     
-    # Filter only available phases in the dataframe
-    available_phases = [p for p in phases if p in df.columns]
+    print(f"--- Generating plots for: {phase_name} ---")
     
-    # Calculate average time per phase per algorithm
-    avg_times = df.groupby('algorithm')[available_phases].mean().reset_index()
-    
-    fig, ax = plt.subplots(figsize=(12, 7))
-    
-    bottom = np.zeros(len(avg_times))
-    # Use a larger color palette for more phases
-    colors = sns.color_palette("husl", len(available_phases))
-    
-    for col, color in zip(available_phases, colors):
-        label = col.replace('_ms', '').replace('_', ' ').capitalize()
-        ax.bar(avg_times['algorithm'], avg_times[col], bottom=bottom, label=label, color=color, width=0.6)
-        bottom += avg_times[col].values
-        
-    plt.title("Mean Execution Time Breakdown (Full Pipeline)", fontsize=14, pad=15)
-    plt.ylabel("Time (ms)", fontsize=12)
-    plt.xlabel("Algorithm", fontsize=12)
-    plt.legend(title="Pipeline Phases", bbox_to_anchor=(1.05, 1), loc='upper left')
-    
-    # Target 20Hz limit line
-    ax.axhline(50, color='red', linestyle=':', alpha=0.5, label='20Hz Budget')
-    
+    # 1. Boxplot
+    plt.figure(figsize=(10, 6))
+    sns.boxplot(x="algorithm", y="total_ms", data=df, palette="Set2")
+    plt.axhline(50, color='red', linestyle='--', label='20Hz Budget')
+    plt.title(f"Latency Distribution: {phase_name}", fontsize=14)
+    plt.ylabel("Total Time (ms)")
     plt.tight_layout()
-    plt.savefig(os.path.join(FIGURES_DIR, "latency_breakdown_stacked.png"), dpi=300)
+    plt.savefig(os.path.join(phase_dir, "latency_boxplot.png"), dpi=300)
     plt.close()
 
-def plot_cones_stability(df):
-    """
-    Plots the number of cones detected frame-by-frame for each algorithm.
-    """
+    # 2. Stacked Bar
+    phases = ['conversion_ms', 'deskewing_ms', 'ground_removal_ms', 'clustering_ms', 'merging_ms', 'estimation_ms', 'duplicate_ms']
+    available = [p for p in phases if p in df.columns]
+    avg_times = df.groupby('algorithm')[available].mean().reset_index()
+    
+    fig, ax = plt.subplots(figsize=(12, 7))
+    bottom = np.zeros(len(avg_times))
+    colors = sns.color_palette("husl", len(available))
+    for col, color in zip(available, colors):
+        label = col.replace('_ms', '').replace('_', ' ').capitalize()
+        ax.bar(avg_times['algorithm'], avg_times[col], bottom=bottom, label=label, color=color)
+        bottom += avg_times[col].values
+    plt.title(f"Execution Breakdown: {phase_name}", fontsize=14)
+    plt.ylabel("Time (ms)")
+    plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+    plt.tight_layout()
+    plt.savefig(os.path.join(phase_dir, "latency_breakdown.png"), dpi=300)
+    plt.close()
+
+    # 3. Stability
     plt.figure(figsize=(12, 6))
     sns.lineplot(data=df, x="frame_id", y="cones_detected", hue="algorithm", alpha=0.7)
-    
-    plt.title("Cone Detection Stability (Frame-by-Frame)", fontsize=14, pad=15)
-    plt.ylabel("Number of Detected Cones", fontsize=12)
-    plt.xlabel("Frame ID", fontsize=12)
+    plt.title(f"Detection Stability: {phase_name}", fontsize=14)
     plt.tight_layout()
-    plt.savefig(os.path.join(FIGURES_DIR, "cones_stability.png"), dpi=300)
+    plt.savefig(os.path.join(phase_dir, "cones_stability.png"), dpi=300)
     plt.close()
 
 def main():
-    """
-    Main entry point for the analysis script.
-    """
     os.makedirs(FIGURES_DIR, exist_ok=True)
-    print("Loading profiling data...")
     df = load_data()
-    
-    if df is not None:
-        print_statistics(df)
-        print(f"Generating charts in {FIGURES_DIR} ...")
-        
-        # 1. Boxplot for all combinations
-        plot_boxplots(df)
-        
-        # 2. Stacked bar for all combinations
-        plot_stacked_bar(df)
-        
-        # 3. Stability for all combinations
-        plot_cones_stability(df)
-        
-        # --- PHASE-SPECIFIC CHARTS ---
-        # If we have both ground and clustering tests, split them for clarity
-        if df['algorithm'].str.contains('_').any():
-            # Clustering test (where ground is slope_based)
-            clustering_df = df[df['algorithm'].str.endswith('_slope_based')]
-            if not clustering_df.empty:
-                print("Generating Clustering-specific comparison...")
-                clustering_df['algorithm'] = clustering_df['algorithm'].str.replace('_slope_based', '').str.capitalize()
-                # We could call functions again with this filtered DF but we'd need to change filenames
-            
-            # Ground test (where clustering is grid)
-            ground_df = df[df['algorithm'].str.startswith('grid_')]
-            if not ground_df.empty:
-                 print("Generating Ground-specific comparison...")
-                 ground_df['algorithm'] = ground_df['algorithm'].str.replace('grid_', '').str.capitalize()
-        
-        print("Analysis and chart generation completed successfully.")
+    if df is None: return
+
+    # Split data based on naming conventions from run_benchmarks.sh
+    # Clustering Phase: grid_slope_based, euclidean_slope_based, etc.
+    clustering_df = df[df['algorithm'].str.contains('_slope_based')].copy()
+    if not clustering_df.empty:
+        clustering_df['algorithm'] = clustering_df['algorithm'].str.replace('_slope_based', '').str.upper()
+        generate_phase_plots(clustering_df, "Clustering Algorithms (Fixed Ground: Slope)", "clustering_comparison")
+
+    # Ground Phase: grid_bin_based, grid_patchworkpp, etc.
+    ground_df = df[df['algorithm'].str.startswith('grid_')].copy()
+    if not ground_df.empty:
+        ground_df['algorithm'] = ground_df['algorithm'].str.replace('grid_', '').str.upper()
+        generate_phase_plots(ground_df, "Ground Removal Algorithms (Fixed Clusterer: Grid)", "ground_comparison")
+
+    print(f"\nAll charts generated in: {FIGURES_DIR}")
 
 if __name__ == "__main__":
     main()

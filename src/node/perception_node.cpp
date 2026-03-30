@@ -227,6 +227,8 @@ LidarPerceptionNode::LidarPerceptionNode() : Node("lidar_perception_node") {
     if (!log_dir.empty() && log_dir.back() != '/') log_dir += '/';
     std::filesystem::create_directories(log_dir); 
     
+    this->declare_parameter<int>("debug_pub_freq", 2); // Publish debug clouds every X frames
+    
     // Combine clustering and ground removal algorithm names for profiling
     std::string profile_name = cl_algo + "_" + gr_type;
     profiler_ = std::make_unique<PerformanceProfiler>(profile_name);
@@ -319,16 +321,18 @@ void LidarPerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPt
     ground_remover_->removeGround(raw_cloud, obstacles_str_, ground_str_);
     if (profiler_) profiler_->stopTimer("ground_removal");
     
-    // Publish debug ground clouds
-    sensor_msgs::msg::PointCloud2 ground_msg;
-    pcl::toROSMsg(*ground_str_, ground_msg);
-    ground_msg.header = msg->header;
-    pub_ground_->publish(ground_msg);
+    // Publish debug ground clouds only at the specified frequency to save bandwidth
+    if (frame_counter_ % this->get_parameter("debug_pub_freq").as_int() == 0) {
+        sensor_msgs::msg::PointCloud2 ground_msg;
+        pcl::toROSMsg(*ground_str_, ground_msg);
+        ground_msg.header = msg->header;
+        pub_ground_->publish(ground_msg);
 
-    sensor_msgs::msg::PointCloud2 no_ground_msg;
-    pcl::toROSMsg(*obstacles_str_, no_ground_msg);
-    no_ground_msg.header = msg->header;
-    pub_no_ground_->publish(no_ground_msg);
+        sensor_msgs::msg::PointCloud2 no_ground_msg;
+        pcl::toROSMsg(*obstacles_str_, no_ground_msg);
+        no_ground_msg.header = msg->header;
+        pub_no_ground_->publish(no_ground_msg);
+    }
     
 
     // Phase 3: Object Clustering
