@@ -20,7 +20,7 @@ private:
     patchwork::Params params_;
     std::unique_ptr<patchwork::PatchWorkpp> patchwork_ptr_;
 
-    // Persistent members to avoid reallocations
+    // Persistent members from working snippet
     Eigen::MatrixXf cloud_eigen_;
     std::vector<int> original_indices_;
 };

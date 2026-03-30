@@ -40,62 +40,77 @@ void Deskewer::addImuMessage(const sensor_msgs::msg::Imu::SharedPtr msg) {
 bool Deskewer::deskew(PointCloudPtr cloud) {
     if (cloud->empty()) return false;
 
-    double sweep_start_time = cloud->points.front().timestamp;
-    double sweep_end_time = cloud->points.back().timestamp;
+    const double sweep_start_time = cloud->points.front().timestamp;
+    const double sweep_end_time = cloud->points.back().timestamp;
+    const double sweep_duration = sweep_end_time - sweep_start_time;
     
-    if (sweep_start_time < 1.0) {
-        static rclcpp::Clock steady_clock(RCL_STEADY_TIME);
-        RCLCPP_WARN_THROTTLE(rclcpp::get_logger("deskewer"), steady_clock, 5000, 
-            "Lidar points have invalid timestamps. Check driver config.");
-        return false;
-    }
+    // Safety check for valid timestamps
+    if (sweep_start_time < 1.0 || sweep_duration < 1e-6) return false;
 
-    // 1. Snapshot of IMU buffer to avoid per-point locking
-    std::vector<LidarOrientations> local_imu_buffer;
+    // 1. Snapshot of IMU buffer (Copy pointers/structs to local memory)
+    std::vector<LidarOrientations> local_buffer;
     {
         std::lock_guard<std::mutex> lock(buffer_mutex_);
         if (imu_buffer_.size() < 2) return false;
         
-        // Range check before copying everything
+        // Ensure the entire sweep is covered by the buffer
         if (sweep_start_time < imu_buffer_.front().timestamp || sweep_end_time > imu_buffer_.back().timestamp) {
             return false;
         }
-        local_imu_buffer.assign(imu_buffer_.begin(), imu_buffer_.end());
+        local_buffer.assign(imu_buffer_.begin(), imu_buffer_.end());
     }
 
-    size_t last_idx = 0;
-    Eigen::Quaternionf start_orientation;
-    if (!getInterpolatedOrientation(sweep_start_time, local_imu_buffer, last_idx, start_orientation)) {
-        return false;
+    // 2. Pre-calculate Keyframes (O(K) where K << N points)
+    // We sample the orientation every 1ms (approx 100 samples for a 10Hz sweep)
+    const int num_keyframes = static_cast<int>(sweep_duration * 1000.0) + 2; 
+    const double time_step = sweep_duration / (num_keyframes - 1);
+    
+    std::vector<Eigen::Quaternionf, Eigen::aligned_allocator<Eigen::Quaternionf>> keyframe_orientations(num_keyframes);
+    size_t last_search_idx = 0;
+
+    for (int i = 0; i < num_keyframes; ++i) {
+        double t = sweep_start_time + i * time_step;
+        getInterpolatedOrientation(t, local_buffer, last_search_idx, keyframe_orientations[i]);
     }
 
-    Eigen::Quaternionf start_orientation_inv = start_orientation.inverse();
-    Eigen::Vector3f lever_arm = config_.static_imu_to_lidar;
-    bool compensate_translation = config_.use_translation && lever_arm.norm() > 0.001f;
+    const Eigen::Quaternionf start_orientation_inv = keyframe_orientations[0].inverse();
+    const Eigen::Vector3f lever_arm = config_.static_imu_to_lidar;
+    const bool use_translation = config_.use_translation && lever_arm.norm() > 0.001f;
 
-    // 2. Batch processing with monotonic search
-    for (auto& point : cloud->points) {
-        Eigen::Quaternionf current_orientation;
-        // Search continues from last_idx due to chronological point ordering
-        if (getInterpolatedOrientation(point.timestamp, local_imu_buffer, last_idx, current_orientation)) {
-            
-            // Optimized math: R_rel = start_inv * current
-            Eigen::Quaternionf relative_rotation = start_orientation_inv * current_orientation;
-            Eigen::Vector3f p(point.x, point.y, point.z);
-            
-            if (compensate_translation) {
-                // p_corrected = R_rel * (p + lever) - lever
-                Eigen::Vector3f p_corrected = relative_rotation * (p + lever_arm) - lever_arm;
-                point.x = p_corrected.x();
-                point.y = p_corrected.y();
-                point.z = p_corrected.z();
-            } else {
-                // p_corrected = R_rel * p
-                Eigen::Vector3f p_corrected = relative_rotation * p;
-                point.x = p_corrected.x();
-                point.y = p_corrected.y();
-                point.z = p_corrected.z();
-            }
+    // 3. Massively Parallel Deskewing (O(N) with OpenMP and SIMD)
+    const int n_points = static_cast<int>(cloud->points.size());
+
+    #pragma omp parallel for schedule(static)
+    for (int i = 0; i < n_points; ++i) {
+        auto& point = cloud->points[i];
+        
+        // Fast Index Mapping (O(1) instead of binary search)
+        double relative_t = point.timestamp - sweep_start_time;
+        int k_idx = static_cast<int>(relative_t / time_step);
+        k_idx = std::clamp(k_idx, 0, num_keyframes - 2);
+        
+        float alpha = static_cast<float>((relative_t - k_idx * time_step) / time_step);
+        alpha = std::clamp(alpha, 0.0f, 1.0f);
+
+        // Fast NLERP (Interpolation of coefficients + Normalization)
+        // Order of magnitude faster than SLERP and visually indistinguishable for small steps.
+        Eigen::Quaternionf current_q;
+        current_q.coeffs() = keyframe_orientations[k_idx].coeffs() * (1.0f - alpha) + 
+                             keyframe_orientations[k_idx+1].coeffs() * alpha;
+        current_q.normalize();
+
+        // Transformation Application: p_corrected = R_relative * p
+        // R_relative = q_start_inv * q_curr
+        Eigen::Quaternionf relative_q = start_orientation_inv * current_q;
+        Eigen::Vector3f p(point.x, point.y, point.z);
+
+        if (use_translation) {
+            // Simplified Lever Arm Correction: p_corrected = R_rel * (p + lever) - lever
+            Eigen::Vector3f p_corrected = relative_q * (p + lever_arm) - lever_arm;
+            point.x = p_corrected.x(); point.y = p_corrected.y(); point.z = p_corrected.z();
+        } else {
+            Eigen::Vector3f p_corrected = relative_q * p;
+            point.x = p_corrected.x(); point.y = p_corrected.y(); point.z = p_corrected.z();
         }
     }
 

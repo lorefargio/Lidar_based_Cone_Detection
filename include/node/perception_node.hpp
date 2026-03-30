@@ -52,6 +52,11 @@ private:
      */
     void callback(const sensor_msgs::msg::PointCloud2::SharedPtr msg);
 
+    /**
+     * @brief Early point cloud truncation and sanitization.
+     */
+    void preProcess(PointCloudPtr cloud);
+
     // ROS 2 publishers and subscriptions
     rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr sub_lidar_;
     rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr sub_imu_;

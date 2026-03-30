@@ -293,6 +293,10 @@ void LidarPerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPt
         return;
     }
 
+    // Phase 1.05: Pre-processing (Truncation and Sanitization)
+    preProcess(raw_cloud);
+    if (raw_cloud->empty()) return;
+
     // Phase 1.1: Lidar Deskewing
     if (this->get_parameter("use_deskewing").as_bool() && deskewer_) {
         if (profiler_) profiler_->startTimer("deskewing");
@@ -304,29 +308,29 @@ void LidarPerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPt
     }
 
     // Phase 2: Ground Removal
-    if (!ground_remover_) {
-        RCLCPP_ERROR_ONCE(this->get_logger(), "Ground remover not initialized!");
-        return;
-    }
+    if (!ground_remover_) return;
 
     if (profiler_) profiler_->startTimer("ground_removal");
     
-    // Safety check for pointers
     if (!obstacles_str_) obstacles_str_ = std::make_shared<PointCloud>();
     if (!ground_str_) ground_str_ = std::make_shared<PointCloud>();
-    
     obstacles_str_->clear();
     ground_str_->clear();
 
+    // DEBUG LOG
+    std::cout << "[DEBUG] Starting Ground Removal..." << std::endl;
     ground_remover_->removeGround(raw_cloud, obstacles_str_, ground_str_);
+    std::cout << "[DEBUG] Ground Removal Finished. Obstacles: " << obstacles_str_->size() << std::endl;
+
     if (profiler_) profiler_->stopTimer("ground_removal");
+    
     
     // Publish debug ground clouds only at the specified frequency to save bandwidth
     if (frame_counter_ % this->get_parameter("debug_pub_freq").as_int() == 0) {
-        sensor_msgs::msg::PointCloud2 ground_msg;
-        pcl::toROSMsg(*ground_str_, ground_msg);
-        ground_msg.header = msg->header;
-        pub_ground_->publish(ground_msg);
+        // sensor_msgs::msg::PointCloud2 ground_msg;
+        // pcl::toROSMsg(*ground_str_, ground_msg);
+        // ground_msg.header = msg->header;
+        // pub_ground_->publish(ground_msg);
 
         sensor_msgs::msg::PointCloud2 no_ground_msg;
         pcl::toROSMsg(*obstacles_str_, no_ground_msg);
@@ -526,6 +530,27 @@ void LidarPerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPt
             }
         }
     }
+}
+
+void LidarPerceptionNode::preProcess(PointCloudPtr cloud) {
+    if (cloud->empty()) return;
+
+    const float max_range = static_cast<float>(this->get_parameter("max_range").as_double());
+    const float max_r2 = max_range * max_range;
+    const float min_r2 = 0.25f * 0.25f; // 50cm blind spot radius
+
+    auto it = std::remove_if(cloud->points.begin(), cloud->points.end(), [&](const PointT& pt) {
+        // Fast distance squared check (avoids sqrt)
+        float r2 = pt.x * pt.x + pt.y * pt.y;
+        return r2 > max_r2 || r2 < min_r2 || !std::isfinite(pt.x) || !std::isfinite(pt.y) || !std::isfinite(pt.z);
+    });
+
+    if (it != cloud->points.end()) {
+        cloud->points.erase(it, cloud->points.end());
+    }
+    cloud->width = static_cast<uint32_t>(cloud->points.size());
+    cloud->height = 1;
+    cloud->is_dense = true;
 }
 
 } // namespace fs_perception
