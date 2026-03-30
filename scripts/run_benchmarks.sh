@@ -34,8 +34,10 @@ for ALGO in "${ALGORITHMS[@]}"; do
     echo -e "\nProcessing algorithm: \e[1;34m$ALGO\e[0m"
 
     # 1. Start Node in a dedicated process group
-    # Using 'setsid' ensures the node can be signaled independently of the script.
-    setsid ros2 run fs_lidar_perception $NODE_NAME --ros-args -p clustering_algorithm:=$ALGO > /dev/null 2>&1 &
+    # We pass the bag_path parameter which is mandatory for the node's safety check
+    setsid ros2 run fs_lidar_perception $NODE_NAME --ros-args \
+        -p clustering_algorithm:=$ALGO \
+        -p bag_path:="$ROSBAG_PATH" &
     NODE_PID=$!
 
     # 2. Dynamic wait (Verify the process successfully started)
