@@ -227,12 +227,14 @@ LidarPerceptionNode::LidarPerceptionNode() : Node("lidar_perception_node") {
     if (!log_dir.empty() && log_dir.back() != '/') log_dir += '/';
     std::filesystem::create_directories(log_dir); 
     
-    profiler_ = std::make_unique<PerformanceProfiler>(cl_algo);
-    json_file_path_ = log_dir + "profiler_" + cl_algo + ".json";
+    // Combine clustering and ground removal algorithm names for profiling
+    std::string profile_name = cl_algo + "_" + gr_type;
+    profiler_ = std::make_unique<PerformanceProfiler>(profile_name);
+    json_file_path_ = log_dir + "profiler_" + profile_name + ".json";
 
     if (this->get_parameter("log_clusters").as_bool()) {
-        cluster_logger_ = std::make_unique<ClusterLogger>(cl_algo);
-        csv_file_path_ = log_dir + "clusters_" + cl_algo + ".csv";
+        cluster_logger_ = std::make_unique<ClusterLogger>(profile_name);
+        csv_file_path_ = log_dir + "clusters_" + profile_name + ".csv";
     }
 
     // --- 7. PUBLISHERS & SUBSCRIBERS ---

@@ -16,31 +16,26 @@ FIGURES_DIR = os.path.join(LOG_DIR, "figures")
 def load_data():
     """
     Loads all JSON profile files from the log directory and combines them into a single DataFrame.
-    Returns:
-        pd.DataFrame: Combined metrics for all algorithms.
-        dict: Metadata for each algorithm session.
     """
     all_data = []
-    metadata = {}
     
     json_files = glob.glob(os.path.join(LOG_DIR, "profiler_*.json"))
     
     if not json_files:
         print(f"Error: No JSON files found in {LOG_DIR}.")
-        return None, None
+        return None
 
     for file in json_files:
         with open(file, 'r') as f:
             data = json.load(f)
-            algo = data['metadata']['algorithm']
-            metadata[algo] = data['metadata']
+            algo_full_name = data['metadata']['algorithm']
             
             df = pd.DataFrame(data['raw_frames'])
-            df['algorithm'] = algo.capitalize()
+            df['algorithm'] = algo_full_name
             df['total_ms'] = df['total_ms'].astype(float)
             all_data.append(df)
             
-    return pd.concat(all_data, ignore_index=True), metadata
+    return pd.concat(all_data, ignore_index=True)
 
 def print_statistics(df):
     """
@@ -148,14 +143,37 @@ def main():
     """
     os.makedirs(FIGURES_DIR, exist_ok=True)
     print("Loading profiling data...")
-    df, metadata = load_data()
+    df = load_data()
     
     if df is not None:
         print_statistics(df)
         print(f"Generating charts in {FIGURES_DIR} ...")
+        
+        # 1. Boxplot for all combinations
         plot_boxplots(df)
+        
+        # 2. Stacked bar for all combinations
         plot_stacked_bar(df)
+        
+        # 3. Stability for all combinations
         plot_cones_stability(df)
+        
+        # --- PHASE-SPECIFIC CHARTS ---
+        # If we have both ground and clustering tests, split them for clarity
+        if df['algorithm'].str.contains('_').any():
+            # Clustering test (where ground is slope_based)
+            clustering_df = df[df['algorithm'].str.endswith('_slope_based')]
+            if not clustering_df.empty:
+                print("Generating Clustering-specific comparison...")
+                clustering_df['algorithm'] = clustering_df['algorithm'].str.replace('_slope_based', '').str.capitalize()
+                # We could call functions again with this filtered DF but we'd need to change filenames
+            
+            # Ground test (where clustering is grid)
+            ground_df = df[df['algorithm'].str.startswith('grid_')]
+            if not ground_df.empty:
+                 print("Generating Ground-specific comparison...")
+                 ground_df['algorithm'] = ground_df['algorithm'].str.replace('grid_', '').str.capitalize()
+        
         print("Analysis and chart generation completed successfully.")
 
 if __name__ == "__main__":
