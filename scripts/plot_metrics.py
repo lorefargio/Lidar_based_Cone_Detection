@@ -84,9 +84,40 @@ def plot_boxplots(df):
     plt.savefig(os.path.join(FIGURES_DIR, "latency_boxplot.png"), dpi=300)
     plt.close()
 
+def plot_distributions(df, phase_name, output_dir):
+    """
+    Generates a Ridgeline-like plot or multiple Histograms with KDE (PDF) 
+    to show the latency distribution for each algorithm.
+    """
+    plt.figure(figsize=(12, 8))
+    
+    # Use histplot with KDE for a clear PDF representation
+    ax = sns.histplot(
+        data=df, x="total_ms", hue="algorithm", 
+        kde=True, element="step", palette="viridis", 
+        common_norm=False, alpha=0.3
+    )
+    
+    # 20Hz real-time budget line (50ms)
+    plt.axvline(50, color='red', linestyle='--', linewidth=2, label='20Hz Budget (50ms)')
+    
+    plt.title(f"Latency Distribution & PDF: {phase_name}", fontsize=16, pad=20)
+    plt.xlabel("Total Execution Time (ms)", fontsize=13)
+    plt.ylabel("Frequency / Density", fontsize=13)
+    
+    # Set x-axis limit to focus on relevant range (0-60ms)
+    plt.xlim(0, max(60, df['total_ms'].quantile(0.99) * 1.2))
+    
+    plt.legend(title="Algorithm", bbox_to_anchor=(1.05, 1), loc='upper left')
+    plt.grid(True, which='both', linestyle='--', alpha=0.5)
+    plt.tight_layout()
+    
+    plt.savefig(os.path.join(output_dir, "latency_distribution_pdf.png"), dpi=300)
+    plt.close()
+
 def generate_phase_plots(df, phase_name, output_subdir):
     """
-    Helper to generate all three standard plots for a specific subset of data.
+    Helper to generate all standard plots for a specific subset of data.
     """
     if df.empty:
         return
@@ -96,17 +127,23 @@ def generate_phase_plots(df, phase_name, output_subdir):
     
     print(f"--- Generating plots for: {phase_name} ---")
     
-    # 1. Boxplot
+    # 1. Boxplot (Distribution & Outliers)
     plt.figure(figsize=(10, 6))
-    sns.boxplot(x="algorithm", y="total_ms", data=df, palette="Set2")
-    plt.axhline(50, color='red', linestyle='--', label='20Hz Budget')
-    plt.title(f"Latency Distribution: {phase_name}", fontsize=14)
-    plt.ylabel("Total Time (ms)")
+    sns.boxplot(x="algorithm", y="total_ms", data=df, palette="Set2", showmeans=True,
+                meanprops={"marker":"o", "markerfacecolor":"white", "markeredgecolor":"black", "markersize":"8"})
+    plt.axhline(50, color='red', linestyle='--', label='20Hz Budget (50ms)')
+    plt.title(f"Latency Boxplot: {phase_name}", fontsize=14)
+    plt.ylabel("Time (ms)")
+    plt.xlabel("Algorithm Configuration")
+    plt.legend()
     plt.tight_layout()
     plt.savefig(os.path.join(phase_dir, "latency_boxplot.png"), dpi=300)
     plt.close()
 
-    # 2. Stacked Bar
+    # 2. PDF & Histogram
+    plot_distributions(df, phase_name, phase_dir)
+
+    # 3. Stacked Bar (Phase Breakdown)
     phases = ['conversion_ms', 'deskewing_ms', 'ground_removal_ms', 'clustering_ms', 'merging_ms', 'estimation_ms', 'duplicate_ms']
     available = [p for p in phases if p in df.columns]
     avg_times = df.groupby('algorithm')[available].mean().reset_index()
@@ -118,17 +155,21 @@ def generate_phase_plots(df, phase_name, output_subdir):
         label = col.replace('_ms', '').replace('_', ' ').capitalize()
         ax.bar(avg_times['algorithm'], avg_times[col], bottom=bottom, label=label, color=color)
         bottom += avg_times[col].values
-    plt.title(f"Execution Breakdown: {phase_name}", fontsize=14)
+    
+    plt.title(f"Execution Breakdown (Average): {phase_name}", fontsize=14)
     plt.ylabel("Time (ms)")
-    plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+    plt.xlabel("Algorithm Configuration")
+    plt.legend(title="Pipeline Stage", bbox_to_anchor=(1.05, 1), loc='upper left')
     plt.tight_layout()
     plt.savefig(os.path.join(phase_dir, "latency_breakdown.png"), dpi=300)
     plt.close()
 
-    # 3. Stability
+    # 4. Stability (Cones detected over time)
     plt.figure(figsize=(12, 6))
     sns.lineplot(data=df, x="frame_id", y="cones_detected", hue="algorithm", alpha=0.7)
     plt.title(f"Detection Stability: {phase_name}", fontsize=14)
+    plt.ylabel("Cones Detected")
+    plt.xlabel("Frame ID")
     plt.tight_layout()
     plt.savefig(os.path.join(phase_dir, "cones_stability.png"), dpi=300)
     plt.close()
