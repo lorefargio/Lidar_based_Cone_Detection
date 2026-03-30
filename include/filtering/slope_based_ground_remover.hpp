@@ -52,6 +52,7 @@ public:
 
 private:
     Config config_; ///< Algorithm configuration.
+    std::vector<std::vector<int>> sectors_; ///< Persistent sector buffer.
 };
 
 } // namespace fs_perception

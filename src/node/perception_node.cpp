@@ -278,9 +278,8 @@ void LidarPerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPt
 
     // Phase 1: Point cloud conversion from ROS to PCL
     if (profiler_) profiler_->startTimer("conversion");
-    PointCloudPtr raw_cloud(new PointCloud);
     try {
-        pcl::fromROSMsg(*msg, *raw_cloud);
+        pcl::fromROSMsg(*msg, *raw_cloud_ptr_);
     } catch (const std::exception& e) {
         RCLCPP_ERROR(this->get_logger(), "Conversion from ROS to PCL failed: %s", e.what());
         if (profiler_) profiler_->stopTimer("conversion");
@@ -288,19 +287,19 @@ void LidarPerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPt
     }
     if (profiler_) profiler_->stopTimer("conversion");
     
-    if (raw_cloud->empty()) {
+    if (raw_cloud_ptr_->empty()) {
         RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 5000, "Received empty cloud.");
         return;
     }
 
     // Phase 1.05: Pre-processing (Truncation and Sanitization)
-    preProcess(raw_cloud);
-    if (raw_cloud->empty()) return;
+    preProcess(raw_cloud_ptr_);
+    if (raw_cloud_ptr_->empty()) return;
 
     // Phase 1.1: Lidar Deskewing
     if (this->get_parameter("use_deskewing").as_bool() && deskewer_) {
         if (profiler_) profiler_->startTimer("deskewing");
-        if (!deskewer_->deskew(raw_cloud)) {
+        if (!deskewer_->deskew(raw_cloud_ptr_)) {
             RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000, 
                 "Deskewing failed (possibly waiting for IMU data).");
         }
@@ -312,15 +311,10 @@ void LidarPerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPt
 
     if (profiler_) profiler_->startTimer("ground_removal");
     
-    if (!obstacles_str_) obstacles_str_ = std::make_shared<PointCloud>();
-    if (!ground_str_) ground_str_ = std::make_shared<PointCloud>();
     obstacles_str_->clear();
     ground_str_->clear();
 
-    // DEBUG LOG
-    std::cout << "[DEBUG] Starting Ground Removal..." << std::endl;
-    ground_remover_->removeGround(raw_cloud, obstacles_str_, ground_str_);
-    std::cout << "[DEBUG] Ground Removal Finished. Obstacles: " << obstacles_str_->size() << std::endl;
+    ground_remover_->removeGround(raw_cloud_ptr_, obstacles_str_, ground_str_);
 
     if (profiler_) profiler_->stopTimer("ground_removal");
     

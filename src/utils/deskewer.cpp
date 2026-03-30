@@ -47,7 +47,7 @@ bool Deskewer::deskew(PointCloudPtr cloud) {
     // Safety check for valid timestamps
     if (sweep_start_time < 1.0 || sweep_duration < 1e-6) return false;
 
-    // 1. Snapshot of IMU buffer (Copy pointers/structs to local memory)
+    // 1. Optimized Snapshot of IMU buffer (Copy only the relevant time slice)
     std::vector<LidarOrientations> local_buffer;
     {
         std::lock_guard<std::mutex> lock(buffer_mutex_);
@@ -57,7 +57,14 @@ bool Deskewer::deskew(PointCloudPtr cloud) {
         if (sweep_start_time < imu_buffer_.front().timestamp || sweep_end_time > imu_buffer_.back().timestamp) {
             return false;
         }
-        local_buffer.assign(imu_buffer_.begin(), imu_buffer_.end());
+
+        // Find relevant slice with 0.1s padding
+        auto it_start = std::lower_bound(imu_buffer_.begin(), imu_buffer_.end(), sweep_start_time - 0.1,
+            [](const LidarOrientations& d, double ts) { return d.timestamp < ts; });
+        auto it_end = std::upper_bound(imu_buffer_.begin(), imu_buffer_.end(), sweep_end_time + 0.1,
+            [](double ts, const LidarOrientations& d) { return ts < d.timestamp; });
+
+        local_buffer.assign(it_start, it_end);
     }
 
     // 2. Pre-calculate Keyframes (O(K) where K << N points)

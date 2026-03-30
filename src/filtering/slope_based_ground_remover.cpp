@@ -5,17 +5,25 @@
 
 namespace fs_perception {
 
-SlopeBasedGroundRemover::SlopeBasedGroundRemover() : config_(Config()) {}
+SlopeBasedGroundRemover::SlopeBasedGroundRemover() : config_(Config()) {
+    sectors_.resize(config_.segments);
+}
 
-SlopeBasedGroundRemover::SlopeBasedGroundRemover(const Config& config) : config_(config) {}
+SlopeBasedGroundRemover::SlopeBasedGroundRemover(const Config& config) : config_(config) {
+    sectors_.resize(config_.segments);
+}
 
 void SlopeBasedGroundRemover::removeGround(const PointCloudConstPtr& cloud_in, PointCloudPtr& cloud_obstacles, PointCloudPtr& cloud_ground) {
     if (cloud_in->empty()) {
         return;
     }
 
-    // Phase 1: Organize points into angular sectors
-    std::vector<std::vector<int>> sectors(config_.segments);
+    // Phase 1: Organize points into angular sectors (Reusing persistent sectors_)
+    for (auto& s : sectors_) {
+        s.clear();
+        s.reserve(cloud_in->size() / config_.segments * 2); 
+    }
+
     for (size_t i = 0; i < cloud_in->size(); ++i) {
         const auto& pt = cloud_in->points[i];
         if (!std::isfinite(pt.x) || !std::isfinite(pt.y) || !std::isfinite(pt.z)) continue;
@@ -24,7 +32,7 @@ void SlopeBasedGroundRemover::removeGround(const PointCloudConstPtr& cloud_in, P
         if (angle < 0) angle += 360.0f;
 
         int s_idx = static_cast<int>(angle / (360.0f / config_.segments)) % config_.segments;
-        sectors[s_idx].push_back(i);
+        sectors_[s_idx].push_back(i);
     }
 
     // Pre-reserve memory for performance
@@ -33,7 +41,7 @@ void SlopeBasedGroundRemover::removeGround(const PointCloudConstPtr& cloud_in, P
 
     // Phase 2: Perform slope-based analysis for each sector independently
     for (int s = 0; s < config_.segments; ++s) {
-        auto& sector_indices = sectors[s];
+        auto& sector_indices = sectors_[s];
         if (sector_indices.empty()) continue;
 
         // Sort sector points by radial distance for consecutive comparison

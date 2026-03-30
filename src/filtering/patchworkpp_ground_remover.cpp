@@ -15,7 +15,6 @@ void PatchworkppGroundRemover::removeGround(const PointCloudConstPtr& cloud_in,
                                             PointCloudPtr& cloud_ground) {
     if (cloud_in->empty() || !patchwork_ptr_) return;
 
-    std::cout << "[PATCHWORK] Phase 1: Mapping to Eigen... " << std::flush;
     // 1. Snapshot and filtered Eigen mapping (Reusing persistent members)
     cloud_eigen_.resize(cloud_in->size(), 4); 
     original_indices_.clear();
@@ -30,21 +29,15 @@ void PatchworkppGroundRemover::removeGround(const PointCloudConstPtr& cloud_in,
             valid_count++;
         }
     }
-    std::cout << "DONE (" << valid_count << " pts)" << std::endl;
 
     if (valid_count == 0) return;
 
     // 2. Perform ground estimation
-    std::cout << "[PATCHWORK] Phase 2: estimateGround... " << std::flush;
-    // Using exactly the structure that worked previously
     patchwork_ptr_->estimateGround(cloud_eigen_.topRows(valid_count));
-    std::cout << "DONE" << std::endl;
 
     // 3. Fast retrieval using indices
-    std::cout << "[PATCHWORK] Phase 3: Retrieving indices... " << std::flush;
     Eigen::VectorXi ground_idx = patchwork_ptr_->getGroundIndices();
     Eigen::VectorXi nonground_idx = patchwork_ptr_->getNongroundIndices();
-    std::cout << "DONE (G:" << ground_idx.size() << " NG:" << nonground_idx.size() << ")" << std::endl;
 
     auto populate_from_indices = [&](const Eigen::VectorXi& indices, PointCloudPtr& dst) {
         dst->points.clear();
@@ -62,10 +55,8 @@ void PatchworkppGroundRemover::removeGround(const PointCloudConstPtr& cloud_in,
         dst->header = cloud_in->header;
     };
 
-    std::cout << "[PATCHWORK] Phase 4: Populating clouds... " << std::flush;
     populate_from_indices(ground_idx, cloud_ground);
     populate_from_indices(nonground_idx, cloud_obstacles);
-    std::cout << "DONE" << std::endl;
 
     // Apply voxel filter to obstacles if enabled
     if (voxel_size_ > 0.001f) {

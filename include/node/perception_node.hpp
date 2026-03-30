@@ -67,6 +67,7 @@ private:
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_no_ground_;
 
     // Internal pipeline storage and interfaces
+    PointCloudPtr raw_cloud_ptr_{new PointCloud};
     PointCloudPtr obstacles_str_{new PointCloud};
     PointCloudPtr ground_str_{new PointCloud};
     std::unique_ptr<GroundRemoverInterface> ground_remover_;

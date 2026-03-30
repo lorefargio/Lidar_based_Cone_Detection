@@ -45,19 +45,13 @@ private:
         int id = -1;                      ///< Cluster ID (-1 if unvisited).
         std::vector<int> point_indices;   ///< Indices of points falling in this cell.
     };
+
+    std::vector<Cell> grid_;  ///< Pre-allocated flat grid.
+    int grid_dim_;            ///< Number of cells in one dimension.
     
-    /**
-     * @struct pair_hash
-     * @brief Hash function for 2D grid coordinates (std::pair<int, int>).
-     */
-    struct pair_hash {
-        template <class T1, class T2>
-        std::size_t operator () (const std::pair<T1,T2>& p) const {
-            auto h1 = std::hash<T1>{}(p.first);
-            auto h2 = std::hash<T2>{}(p.second);
-            return h1 ^ (h2 << 1); 
-        }
-    };
+    inline int getGridIndex(int x, int y) const {
+        return (x + grid_dim_/2) * grid_dim_ + (y + grid_dim_/2);
+    }
 };
 
 } // namespace fs_perception

@@ -95,31 +95,37 @@ ClusterFeatures ConeEstimator::extractFeatures(const PointCloudPtr& cluster) {
     f.range = std::sqrt(f.x * f.x + f.y * f.y);
     f.bearing = std::atan2(f.y, f.x);
 
-    // 2. Shape classification using PCA
-    pcl::PCA<PointT> pca;
-    pca.setInputCloud(cluster);
-    Eigen::Vector3f eigenvalues = pca.getEigenValues().head<3>();
-    Eigen::Matrix3f eigenvectors = pca.getEigenVectors();
-    
-    float l1 = eigenvalues[0];
+    // 2. Shape classification using direct Covariance Matrix (Fast PCA replacement)
+    Eigen::Matrix3f covariance_matrix;
+    Eigen::Vector4f mean;
+    pcl::computeMeanAndCovarianceMatrix(*cluster, covariance_matrix, mean);
+
+    // Solve for eigenvalues (3x3 symmetric matrix)
+    Eigen::SelfAdjointEigenSolver<Eigen::Matrix3f> solver(covariance_matrix);
+    Eigen::Vector3f eigenvalues = solver.eigenvalues(); // Sorted in ascending order
+    Eigen::Matrix3f eigenvectors = solver.eigenvectors();
+
+    // Re-order eigenvalues to descending: l1 >= l2 >= l3
+    float l1 = eigenvalues[2];
     float l2 = eigenvalues[1];
-    float l3 = eigenvalues[2];
+    float l3 = eigenvalues[0];
     
     float sum_l = l1 + l2 + l3;
-    if (sum_l > 1e-6) {
+    if (sum_l > 1e-6f) {
         f.linearity = (l1 - l2) / l1;
         f.planarity = (l2 - l3) / l1;
         f.scattering = l3 / l1;
     }
     
-    f.verticality = std::abs(eigenvectors(2, 0)); 
+    // Verticality: dot product of primary eigenvector and Z-axis
+    f.verticality = std::abs(eigenvectors(2, 2)); 
 
     // 3. Intensity analysis
     double sum_intensity = 0.0;
     for (const auto& pt : cluster->points) {
         sum_intensity += pt.intensity;
     }
-    f.avg_intensity = sum_intensity / f.point_count;
+    f.avg_intensity = static_cast<float>(sum_intensity / f.point_count);
     
     // 4. Geometric dimensions (Bounding Box)
     PointT min_pt, max_pt;
@@ -131,10 +137,10 @@ ClusterFeatures ConeEstimator::extractFeatures(const PointCloudPtr& cluster) {
     float w_x = max_pt.x - min_pt.x;
     float w_y = max_pt.y - min_pt.y;
     f.width_max = std::max(w_x, w_y);
-    f.width_min = std::min(w_x, w_y);
+    f.width_min = std::max(0.001f, std::min(w_x, w_y));
     
-    f.aspect_ratio = (f.height > 0) ? f.width_max / f.height : 0;
-    f.symmetry = (f.width_min > 0.001f) ? f.width_max / f.width_min : 10.0f;
+    f.aspect_ratio = (f.height > 0.001f) ? f.width_max / f.height : 0.0f;
+    f.symmetry = f.width_max / f.width_min;
 
     return f;
 }
