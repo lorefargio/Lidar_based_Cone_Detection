@@ -59,9 +59,12 @@ private:
     std::mutex buffer_mutex_;
 
     /**
-     * @brief Interpolates orientation from the pre-processed buffer.
+     * @brief Interpolates orientation from a provided buffer.
      */
-    bool getInterpolatedOrientation(double timestamp, Eigen::Quaternionf& orientation);
+    bool getInterpolatedOrientation(double timestamp, 
+                                    const std::vector<LidarOrientations>& buffer,
+                                    size_t& last_idx,
+                                    Eigen::Quaternionf& orientation);
 
     // TODO: Add TF handling if Lidar and IMU are not aligned.
     // For now, we assume the IMU data is already in or can be easily mapped to the Lidar frame

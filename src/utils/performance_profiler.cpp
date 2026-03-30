@@ -31,12 +31,20 @@ void PerformanceProfiler::stopTimer(const std::string& phase) {
         double elapsed = std::chrono::duration<double, std::milli>(end_time - timers_[phase]).count();
         
         // Map the measured time to the corresponding frame data field
-        if (phase == "ground_removal") {
+        if (phase == "conversion") {
+            current_frame_data_.conversion_ms = elapsed;
+        } else if (phase == "deskewing") {
+            current_frame_data_.deskewing_ms = elapsed;
+        } else if (phase == "ground_removal") {
             current_frame_data_.ground_removal_ms = elapsed;
         } else if (phase == "clustering") {
             current_frame_data_.clustering_ms = elapsed;
+        } else if (phase == "merging") {
+            current_frame_data_.merging_ms = elapsed;
         } else if (phase == "estimation") {
             current_frame_data_.estimation_ms = elapsed;
+        } else if (phase == "duplicate") {
+            current_frame_data_.duplicate_ms = elapsed;
         } else if (phase == "total") {
             current_frame_data_.total_ms = elapsed;
         }
@@ -68,9 +76,13 @@ void PerformanceProfiler::saveToJSON(const std::string& filepath) {
         const auto& f = frames_[i];
         out << "    {\n";
         out << "      \"frame_id\": " << f.frame_id << ",\n";
+        out << "      \"conversion_ms\": " << std::fixed << std::setprecision(3) << f.conversion_ms << ",\n";
+        out << "      \"deskewing_ms\": " << std::fixed << std::setprecision(3) << f.deskewing_ms << ",\n";
         out << "      \"ground_removal_ms\": " << std::fixed << std::setprecision(3) << f.ground_removal_ms << ",\n";
         out << "      \"clustering_ms\": " << std::fixed << std::setprecision(3) << f.clustering_ms << ",\n";
+        out << "      \"merging_ms\": " << std::fixed << std::setprecision(3) << f.merging_ms << ",\n";
         out << "      \"estimation_ms\": " << std::fixed << std::setprecision(3) << f.estimation_ms << ",\n";
+        out << "      \"duplicate_ms\": " << std::fixed << std::setprecision(3) << f.duplicate_ms << ",\n";
         out << "      \"total_ms\": " << std::fixed << std::setprecision(3) << f.total_ms << ",\n";
         out << "      \"cones_detected\": " << f.cones_detected << "\n";
         out << "    }";

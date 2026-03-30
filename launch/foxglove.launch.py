@@ -26,6 +26,7 @@ def generate_launch_description():
     # Patchwork++
     pw_iter_arg = DeclareLaunchArgument('pw_num_iter', default_value='3')
     pw_dist_arg = DeclareLaunchArgument('pw_th_dist', default_value='0.02')
+    pw_tgr_arg = DeclareLaunchArgument('pw_enable_TGR', default_value='true')
 
     # --- 4. CLUSTERING PARAMETERS ---
     # Euclidean
@@ -68,6 +69,7 @@ def generate_launch_description():
             'slope_max_slope': LaunchConfiguration('slope_max_slope'),
             'pw_num_iter': LaunchConfiguration('pw_num_iter'),
             'pw_th_dist': LaunchConfiguration('pw_th_dist'),
+            'pw_enable_TGR': LaunchConfiguration('pw_enable_TGR'),
             'euclidean_tolerance': LaunchConfiguration('euclidean_tolerance'),
             'dbscan_eps': LaunchConfiguration('dbscan_eps'),
             'voxel_grid_size': LaunchConfiguration('voxel_grid_size'),
@@ -121,6 +123,7 @@ def generate_launch_description():
         slope_max_arg,
         pw_iter_arg,
         pw_dist_arg,
+        pw_tgr_arg,
         euc_tol_arg,
         db_eps_arg,
         vox_grid_arg,

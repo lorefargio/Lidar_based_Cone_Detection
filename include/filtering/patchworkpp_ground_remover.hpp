@@ -20,10 +20,9 @@ private:
     patchwork::Params params_;
     std::unique_ptr<patchwork::PatchWorkpp> patchwork_ptr_;
 
-    // Membri persistenti per evitare allocazioni/distruzioni sullo stack
+    // Persistent members to avoid reallocations
     Eigen::MatrixXf cloud_eigen_;
-    Eigen::MatrixX3f ground_pts_;
-    Eigen::MatrixX3f nonground_pts_;
+    std::vector<int> original_indices_;
 };
 
 } // namespace fs_perception

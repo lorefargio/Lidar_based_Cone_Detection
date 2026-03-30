@@ -95,6 +95,7 @@ LidarPerceptionNode::LidarPerceptionNode() : Node("lidar_perception_node") {
         this->declare_parameter<double>("pw_min_range", 0.5);
         this->declare_parameter<double>("pw_uprightness_thr", 0.707);
         this->declare_parameter<bool>("pw_enable_RNR", true); 
+        this->declare_parameter<bool>("pw_enable_TGR", true); // Terrain Gradient Robustness
 
         pw_params.sensor_height = std::abs(sensor_z);
         pw_params.max_range = max_range;
@@ -103,6 +104,7 @@ LidarPerceptionNode::LidarPerceptionNode() : Node("lidar_perception_node") {
         pw_params.min_range = this->get_parameter("pw_min_range").as_double();
         pw_params.uprightness_thr = this->get_parameter("pw_uprightness_thr").as_double();
         pw_params.enable_RNR = this->get_parameter("pw_enable_RNR").as_bool();
+        pw_params.enable_TGR = this->get_parameter("pw_enable_TGR").as_bool();
 
         ground_remover_ = std::make_unique<PatchworkppGroundRemover>(pw_params);
         RCLCPP_INFO(this->get_logger(), "Ground Removal: PATCHWORK++");
@@ -271,13 +273,16 @@ void LidarPerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPt
     if (profiler_) profiler_->startFrame();
 
     // Phase 1: Point cloud conversion from ROS to PCL
+    if (profiler_) profiler_->startTimer("conversion");
     PointCloudPtr raw_cloud(new PointCloud);
     try {
         pcl::fromROSMsg(*msg, *raw_cloud);
     } catch (const std::exception& e) {
         RCLCPP_ERROR(this->get_logger(), "Conversion from ROS to PCL failed: %s", e.what());
+        if (profiler_) profiler_->stopTimer("conversion");
         return;
     }
+    if (profiler_) profiler_->stopTimer("conversion");
     
     if (raw_cloud->empty()) {
         RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 5000, "Received empty cloud.");
@@ -310,6 +315,7 @@ void LidarPerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPt
     ground_str_->clear();
 
     ground_remover_->removeGround(raw_cloud, obstacles_str_, ground_str_);
+    if (profiler_) profiler_->stopTimer("ground_removal");
     
     // Publish debug ground clouds
     sensor_msgs::msg::PointCloud2 ground_msg;
@@ -332,8 +338,10 @@ void LidarPerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPt
     if (profiler_) profiler_->startTimer("clustering");
     std::vector<PointCloudPtr> clusters;
     clusterer_->cluster(obstacles_str_, clusters);
+    if (profiler_) profiler_->stopTimer("clustering");
 
     // Phase 3.1: Proximity-based Cluster Merging to handle over-segmented objects
+    if (profiler_) profiler_->startTimer("merging");
     std::vector<PointCloudPtr> merged_clusters;
     std::vector<bool> merged_flag(clusters.size(), false);
     
@@ -361,7 +369,7 @@ void LidarPerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPt
         }
         merged_clusters.push_back(super_cluster);
     }
-    if (profiler_) profiler_->stopTimer("clustering");
+    if (profiler_) profiler_->stopTimer("merging");
 
     // Phase 4: Candidate Estimation and Duplicate Filtering
     if (!estimator_) {
@@ -383,8 +391,10 @@ void LidarPerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPt
             candidate_cones.push_back(cone);
         }
     }
+    if (profiler_) profiler_->stopTimer("estimation");
     
     // Duplicate suppression using spatial proximity
+    if (profiler_) profiler_->startTimer("duplicate");
     const float MIN_DIST_SQ = 0.4f * 0.4f; // 40cm duplicate radius
     std::vector<Cone> final_cones;
 
@@ -402,8 +412,7 @@ void LidarPerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPt
             final_cones.push_back(candidate);
         }
     }
-
-    if (profiler_) profiler_->stopTimer("estimation");
+    if (profiler_) profiler_->stopTimer("duplicate");
 
     // Phase 5: Visualization Markers and Detection Output
     visualization_msgs::msg::MarkerArray markers;

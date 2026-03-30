@@ -40,103 +40,100 @@ void Deskewer::addImuMessage(const sensor_msgs::msg::Imu::SharedPtr msg) {
 bool Deskewer::deskew(PointCloudPtr cloud) {
     if (cloud->empty()) return false;
 
-    // Check if the first point has a valid timestamp (not zero or near-zero)
     double sweep_start_time = cloud->points.front().timestamp;
+    double sweep_end_time = cloud->points.back().timestamp;
     
-    if (sweep_start_time < 1.0) { // Likely uninitialized or relative timestamp
+    if (sweep_start_time < 1.0) {
         static rclcpp::Clock steady_clock(RCL_STEADY_TIME);
         RCLCPP_WARN_THROTTLE(rclcpp::get_logger("deskewer"), steady_clock, 5000, 
-            "Lidar points have invalid timestamps (approx 0). Check Lidar driver configuration.");
+            "Lidar points have invalid timestamps. Check driver config.");
         return false;
     }
 
-    Eigen::Quaternionf start_orientation;
-    if (!getInterpolatedOrientation(sweep_start_time, start_orientation)) {
+    // 1. Snapshot of IMU buffer to avoid per-point locking
+    std::vector<LidarOrientations> local_imu_buffer;
+    {
         std::lock_guard<std::mutex> lock(buffer_mutex_);
-        static rclcpp::Clock steady_clock(RCL_STEADY_TIME);
-        if (imu_buffer_.empty()) {
-            RCLCPP_WARN_THROTTLE(rclcpp::get_logger("deskewer"), steady_clock, 5000, "IMU buffer is empty. Waiting for data...");
-        } else {
-            double buf_start = imu_buffer_.front().timestamp;
-            double buf_end = imu_buffer_.back().timestamp;
-            RCLCPP_WARN_THROTTLE(rclcpp::get_logger("deskewer"), steady_clock, 5000, 
-                "Lidar time (%.3f) out of IMU buffer range [%.3f - %.3f]. Drift: %.3f s", 
-                sweep_start_time, buf_start, buf_end, sweep_start_time - buf_end);
+        if (imu_buffer_.size() < 2) return false;
+        
+        // Range check before copying everything
+        if (sweep_start_time < imu_buffer_.front().timestamp || sweep_end_time > imu_buffer_.back().timestamp) {
+            return false;
         }
+        local_imu_buffer.assign(imu_buffer_.begin(), imu_buffer_.end());
+    }
+
+    size_t last_idx = 0;
+    Eigen::Quaternionf start_orientation;
+    if (!getInterpolatedOrientation(sweep_start_time, local_imu_buffer, last_idx, start_orientation)) {
         return false;
     }
 
     Eigen::Quaternionf start_orientation_inv = start_orientation.inverse();
     Eigen::Vector3f lever_arm = config_.static_imu_to_lidar;
+    bool compensate_translation = config_.use_translation && lever_arm.norm() > 0.001f;
 
-    // Process each point in the cloud (O(N) where N is points per sweep)
+    // 2. Batch processing with monotonic search
     for (auto& point : cloud->points) {
         Eigen::Quaternionf current_orientation;
-        if (getInterpolatedOrientation(point.timestamp, current_orientation)) {
-            // 1. Rotation Correction
+        // Search continues from last_idx due to chronological point ordering
+        if (getInterpolatedOrientation(point.timestamp, local_imu_buffer, last_idx, current_orientation)) {
+            
+            // Optimized math: R_rel = start_inv * current
             Eigen::Quaternionf relative_rotation = start_orientation_inv * current_orientation;
-
             Eigen::Vector3f p(point.x, point.y, point.z);
-            Eigen::Vector3f p_corrected = relative_rotation * p;
-
-            // 2. Lever Arm Compensation (Translation correction)
-            // If the car rotates, the Lidar (at the end of the arm) moves linearly.
-            // Delta_T = start_orientation_inv * (current_rotation * lever_arm - start_rotation * lever_arm)
-            if (config_.use_translation && lever_arm.norm() > 0.001f) {
-                Eigen::Vector3f p_start_lever = start_orientation * lever_arm;
-                Eigen::Vector3f p_curr_lever = current_orientation * lever_arm;
-                Eigen::Vector3f translation_compensation = start_orientation_inv * (p_curr_lever - p_start_lever);
-                p_corrected += translation_compensation;
+            
+            if (compensate_translation) {
+                // p_corrected = R_rel * (p + lever) - lever
+                Eigen::Vector3f p_corrected = relative_rotation * (p + lever_arm) - lever_arm;
+                point.x = p_corrected.x();
+                point.y = p_corrected.y();
+                point.z = p_corrected.z();
+            } else {
+                // p_corrected = R_rel * p
+                Eigen::Vector3f p_corrected = relative_rotation * p;
+                point.x = p_corrected.x();
+                point.y = p_corrected.y();
+                point.z = p_corrected.z();
             }
-
-            point.x = p_corrected.x();
-            point.y = p_corrected.y();
-            point.z = p_corrected.z();
         }
     }
 
     return true;
 }
 
-bool Deskewer::getInterpolatedOrientation(double timestamp, Eigen::Quaternionf& orientation) {
-    std::lock_guard<std::mutex> lock(buffer_mutex_);
-    
-    if (imu_buffer_.size() < 2) return false;
+bool Deskewer::getInterpolatedOrientation(double timestamp, 
+                                          const std::vector<LidarOrientations>& buffer,
+                                          size_t& last_idx,
+                                          Eigen::Quaternionf& orientation) {
+    if (buffer.size() < 2) return false;
 
-    // Buffer range check
-    if (timestamp < imu_buffer_.front().timestamp || timestamp > imu_buffer_.back().timestamp) {
-        return false;
+    // Linear monotonic search starting from last_idx
+    size_t i = last_idx;
+    while (i + 1 < buffer.size() && buffer[i + 1].timestamp < timestamp) {
+        i++;
+    }
+    last_idx = i;
+
+    // Ensure timestamp is within the found interval
+    if (i + 1 >= buffer.size() || buffer[i].timestamp > timestamp || buffer[i+1].timestamp < timestamp) {
+        // Fallback to binary search if monotonic search fails (e.g. non-ordered points)
+        auto it = std::lower_bound(buffer.begin(), buffer.end(), timestamp,
+            [](const LidarOrientations& data, double ts) {
+                return data.timestamp < ts;
+            });
+        if (it == buffer.begin() || it == buffer.end()) return false;
+        i = std::distance(buffer.begin(), it) - 1;
     }
 
-    // Binary search (std::lower_bound) is fast on deque of structs
-    auto it = std::lower_bound(imu_buffer_.begin(), imu_buffer_.end(), timestamp,
-        [](const LidarOrientations& data, double ts) {
-            return data.timestamp < ts;
-        });
+    const auto& b = buffer[i];
+    const auto& a = buffer[i+1];
 
-    if (it == imu_buffer_.begin() || it == imu_buffer_.end()) {
-        return false;
-    }
-
-    const auto& data_after = *it;
-    const auto& data_before = *(--it);
-
-    // Diagnostics: Log time gap between IMU messages (should be ~2.5ms for 400Hz)
-    double msg_gap = data_after.timestamp - data_before.timestamp;
-    if (msg_gap > 0.05) { // 50ms gap is too large for 400Hz
-        static rclcpp::Clock steady_clock(RCL_STEADY_TIME);
-        RCLCPP_WARN_THROTTLE(rclcpp::get_logger("deskewer"), steady_clock, 5000, 
-            "Large gap (%.3f s) in IMU buffer. Slerp interpolation may be inaccurate.", msg_gap);
-    }
-
-    // Slerp Factor Calculation
-    double dt = data_after.timestamp - data_before.timestamp;
+    double dt = a.timestamp - b.timestamp;
     if (dt < 1e-9) return false; 
     
-    double alpha = (timestamp - data_before.timestamp) / dt;
-
-    // Perform Slerp on pre-processed quaternions
-    orientation = data_before.orientation.slerp(static_cast<float>(alpha), data_after.orientation);
+    double alpha = (timestamp - b.timestamp) / dt;
+    orientation = b.orientation.slerp(static_cast<float>(alpha), a.orientation);
     
     return true;
 }

@@ -15,9 +15,13 @@ namespace fs_perception {
  */
 struct FrameData {
     int frame_id;                 ///< Unique identifier for the processed frame.
+    double conversion_ms = 0.0;     ///< Time taken for ROS to PCL conversion (ms).
+    double deskewing_ms = 0.0;      ///< Time taken for the deskewing stage (ms).
     double ground_removal_ms = 0.0; ///< Time taken for the ground removal stage (ms).
     double clustering_ms = 0.0;     ///< Time taken for the clustering stage (ms).
+    double merging_ms = 0.0;        ///< Time taken for the merging stage (ms).
     double estimation_ms = 0.0;     ///< Time taken for the estimation stage (ms).
+    double duplicate_ms = 0.0;      ///< Time taken for the duplicate suppression stage (ms).
     double total_ms = 0.0;          ///< Total end-to-end processing time (ms).
     int cones_detected = 0;         ///< Number of cones successfully detected in the frame.
 };
