@@ -35,13 +35,13 @@ echo "   Bag Path: $ROSBAG_PATH"
 echo "=========================================================="
 
 # --- Phase 1: Clustering Benchmarks ---
-echo -e "\n>>> PHASE 1: Testing Clustering Algorithms (Ground: slope_based)"
+echo -e "\n>>> PHASE 1: Testing Clustering Algorithms (Ground: patchworkpp)"
 for ALGO in "${CLUSTERING_ALGOS[@]}"; do
     echo -e "\nProcessing Clustering: \e[1;34m$ALGO\e[0m"
 
     setsid ros2 run fs_lidar_perception $NODE_NAME --ros-args \
         -p clustering_algorithm:=$ALGO \
-        -p ground_remover_type:=slope_based \
+        -p ground_remover_type:=patchworkpp \
         -p bag_path:="$ROSBAG_PATH" &
     NODE_PID=$!
 

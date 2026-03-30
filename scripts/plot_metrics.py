@@ -229,11 +229,11 @@ def main():
     if df is None: return
 
     # Split data based on naming conventions from run_benchmarks.sh
-    # Clustering Phase: grid_slope_based, euclidean_slope_based, etc.
-    clustering_df = df[df['algorithm'].str.contains('_slope_based')].copy()
+    # Clustering Phase: grid_patchworkpp, euclidean_patchworkpp, etc.
+    clustering_df = df[df['algorithm'].str.contains('_patchworkpp')].copy()
     if not clustering_df.empty:
-        clustering_df['algorithm'] = clustering_df['algorithm'].str.replace('_slope_based', '').str.upper()
-        generate_phase_plots(clustering_df, "Clustering Algorithms (Fixed Ground: Slope)", "clustering_comparison")
+        clustering_df['algorithm'] = clustering_df['algorithm'].str.replace('_patchworkpp', '').str.upper()
+        generate_phase_plots(clustering_df, "Clustering Algorithms (Fixed Ground: Patchworkpp)", "clustering_comparison")
 
     # Ground Phase: grid_bin_based, grid_patchworkpp, etc.
     ground_df = df[df['algorithm'].str.startswith('grid_')].copy()
