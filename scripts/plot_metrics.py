@@ -202,14 +202,25 @@ def generate_phase_plots(df, phase_name, output_subdir):
     # 4. Stacked Bar (P99 Breakdown)
     plot_p99_breakdown(df, phase_name, phase_dir)
 
-    # 5. Stability (Cones detected over time)
-    plt.figure(figsize=(12, 6))
-    sns.lineplot(data=df, x="frame_id", y="cones_detected", hue="algorithm", alpha=0.7)
-    plt.title(f"Detection Stability: {phase_name}", fontsize=14)
-    plt.ylabel("Cones Detected")
-    plt.xlabel("Frame ID")
-    plt.tight_layout()
-    plt.savefig(os.path.join(phase_dir, "cones_stability.png"), dpi=300)
+    # 5. Stability (Cones detected over time) - Faceted for clarity
+    g_stab = sns.FacetGrid(df, col="algorithm", hue="algorithm", col_wrap=3, 
+                           height=4, aspect=1.2, palette="Set1", sharey=True)
+    
+    g_stab.map(sns.lineplot, "frame_id", "cones_detected", alpha=0.8)
+    
+    # Add grid and labels to each subplot
+    for ax in g_stab.axes.flat:
+        ax.grid(True, linestyle='--', alpha=0.6)
+        ax.set_xlabel("Frame ID")
+        ax.set_ylabel("Cones Count")
+
+    g_stab.add_legend(title="Algorithm")
+    g_stab.set_titles("{col_name}")
+    
+    plt.subplots_adjust(top=0.9)
+    g_stab.fig.suptitle(f"Detection Stability over Time: {phase_name}", fontsize=16)
+    
+    plt.savefig(os.path.join(phase_dir, "cones_stability_faceted.png"), dpi=300)
     plt.close()
 
 def main():
