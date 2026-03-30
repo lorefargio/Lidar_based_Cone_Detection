@@ -53,6 +53,29 @@ namespace fs_perception {
     };
 
     /**
+     * @struct ClusterFeatures
+     * @brief Detailed geometric and statistical features of a 3D cluster.
+     */
+    struct ClusterFeatures {
+        int frame_id = 0;
+        int cluster_id = 0;
+        int point_count = 0;
+        float x = 0.0f, y = 0.0f, z = 0.0f;
+        float range = 0.0f;
+        float bearing = 0.0f;
+        float height = 0.0f;
+        float width_max = 0.0f;
+        float width_min = 0.0f;
+        float aspect_ratio = 0.0f;
+        float avg_intensity = 0.0f;
+        float linearity = 0.0f;
+        float planarity = 0.0f;
+        float scattering = 0.0f;
+        float verticality = 0.0f;
+        float symmetry = 0.0f; // max_width / min_width
+    };
+
+    /**
      * @struct Cone
      * @brief Representation of a detected cone with its estimated properties.
      */
@@ -64,5 +87,6 @@ namespace fs_perception {
         float confidence;     ///< Confidence score of the detection (0.0 to 1.0).
         float height;         ///< Estimated height of the cone (meters), used for debug.
         PointCloudPtr cloud;  ///< Original points belonging to this cone cluster.
+        ClusterFeatures features; ///< Extracted characteristics of the cluster.
     };
 }

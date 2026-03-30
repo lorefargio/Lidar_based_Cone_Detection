@@ -36,6 +36,7 @@ LidarPerceptionNode::LidarPerceptionNode() : Node("lidar_perception_node") {
     this->declare_parameter<std::string>("ground_remover_type", "slope_based");
     this->declare_parameter<std::string>("estimator_type", "rule_based");
     this->declare_parameter<std::string>("log_dir", "log_profiler/");
+    this->declare_parameter<bool>("log_clusters", true);
     
     // Common geometric/filtering parameters
     this->declare_parameter<double>("sensor_z", -0.50);
@@ -227,6 +228,11 @@ LidarPerceptionNode::LidarPerceptionNode() : Node("lidar_perception_node") {
     profiler_ = std::make_unique<PerformanceProfiler>(cl_algo);
     json_file_path_ = log_dir + "profiler_" + cl_algo + ".json";
 
+    if (this->get_parameter("log_clusters").as_bool()) {
+        cluster_logger_ = std::make_unique<ClusterLogger>(cl_algo);
+        csv_file_path_ = log_dir + "clusters_" + cl_algo + ".csv";
+    }
+
     // --- 7. PUBLISHERS & SUBSCRIBERS ---
     sub_lidar_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
         "/lidar_points", rclcpp::SensorDataQoS(), 
@@ -251,6 +257,10 @@ LidarPerceptionNode::~LidarPerceptionNode() {
     if (profiler_) {
         profiler_->saveToJSON(json_file_path_);
         RCLCPP_INFO(this->get_logger(), "Profiling data saved to JSON before exit.");
+    }
+    if (cluster_logger_ && !csv_file_path_.empty()) {
+        cluster_logger_->saveToCSV(csv_file_path_);
+        RCLCPP_INFO(this->get_logger(), "Cluster analysis data saved to CSV before exit.");
     }
 }
 
@@ -362,9 +372,14 @@ void LidarPerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPt
     if (profiler_) profiler_->startTimer("estimation");
     std::vector<Cone> candidate_cones;
 
-    for (const auto& c : merged_clusters) {
-        auto cone = estimator_->estimate(c);
+    for (size_t i = 0; i < merged_clusters.size(); ++i) {
+        auto cone = estimator_->estimate(merged_clusters[i]);
         if (cone.confidence > 0.5f) {
+            if (cluster_logger_) {
+                cone.features.frame_id = frame_counter_;
+                cone.features.cluster_id = static_cast<int>(i);
+                cluster_logger_->addCluster(cone.features);
+            }
             candidate_cones.push_back(cone);
         }
     }

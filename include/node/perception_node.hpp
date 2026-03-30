@@ -17,6 +17,7 @@
 #include "estimation/cone_estimator.hpp"
 #include "utils/performance_profiler.hpp"
 #include "utils/deskewer.hpp"
+#include "utils/cluster_logger.hpp"
 
 namespace fs_perception {
 
@@ -70,7 +71,9 @@ private:
     
     // Benchmarking and logging tools
     std::unique_ptr<PerformanceProfiler> profiler_;
+    std::unique_ptr<ClusterLogger> cluster_logger_;
     std::string json_file_path_;
+    std::string csv_file_path_;
     int frame_counter_ = 0;
 };
 

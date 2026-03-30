@@ -40,6 +40,7 @@ def generate_launch_description():
     pca_scat_arg = DeclareLaunchArgument('pca_min_scatter', default_value='0.02')
     rule_decay_arg = DeclareLaunchArgument('rule_dynamic_width_decay', default_value='0.005')
     rule_pts_arg = DeclareLaunchArgument('rule_min_points_at_10m', default_value='10')
+    log_clusters_arg = DeclareLaunchArgument('log_clusters', default_value='true')
 
     # --- 6. DESKEWING & FILTERS ---
     use_deskew_arg = DeclareLaunchArgument('use_deskewing', default_value='true')
@@ -74,6 +75,7 @@ def generate_launch_description():
             'pca_min_scatter': LaunchConfiguration('pca_min_scatter'),
             'rule_dynamic_width_decay': LaunchConfiguration('rule_dynamic_width_decay'),
             'rule_min_points_at_10m': LaunchConfiguration('rule_min_points_at_10m'),
+            'log_clusters': LaunchConfiguration('log_clusters'),
             'use_deskewing': LaunchConfiguration('use_deskewing'),
             'imu_topic': LaunchConfiguration('imu_topic'),
             'use_voxel_filter': LaunchConfiguration('use_voxel_filter'),
@@ -126,6 +128,7 @@ def generate_launch_description():
         pca_scat_arg,
         rule_decay_arg,
         rule_pts_arg,
+        log_clusters_arg,
         use_deskew_arg,
         imu_topic_arg,
         use_vox_filt_arg,

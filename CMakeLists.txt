@@ -55,6 +55,7 @@ add_executable(perception_node
   src/clustering/voxel_connected_components.cpp
   src/estimation/cone_estimator.cpp
   src/utils/performance_profiler.cpp
+  src/utils/cluster_logger.cpp
   src/utils/deskewer.cpp
 )
 

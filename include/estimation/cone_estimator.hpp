@@ -56,6 +56,13 @@ public:
      */
     Cone estimate(const PointCloudPtr& cluster);
 
+    /**
+     * @brief Extracts geometric and statistical features from a cluster.
+     * @param cluster Point cloud of a single candidate object.
+     * @return ClusterFeatures structure containing all calculated metrics.
+     */
+    ClusterFeatures extractFeatures(const PointCloudPtr& cluster);
+
 private:
     Config config_; ///< Current configuration parameters.
 };
