@@ -86,33 +86,68 @@ def plot_boxplots(df):
 
 def plot_distributions(df, phase_name, output_dir):
     """
-    Generates a Ridgeline-like plot or multiple Histograms with KDE (PDF) 
-    to show the latency distribution for each algorithm.
+    Generates a Faceted Histogram & KDE plot to separate algorithms for better comparison.
     """
-    plt.figure(figsize=(12, 8))
+    # Create a FacetGrid for cleaner separation
+    g = sns.FacetGrid(df, col="algorithm", hue="algorithm", col_wrap=3, 
+                      height=4, aspect=1.2, palette="viridis", sharey=False)
     
-    # Use histplot with KDE for a clear PDF representation
-    ax = sns.histplot(
-        data=df, x="total_ms", hue="algorithm", 
-        kde=True, element="step", palette="viridis", 
-        common_norm=False, alpha=0.3
-    )
+    g.map(sns.histplot, "total_ms", kde=True, element="step", alpha=0.4)
     
-    # 20Hz real-time budget line (50ms)
-    plt.axvline(50, color='red', linestyle='--', linewidth=2, label='20Hz Budget (50ms)')
+    # Add budget line to each subplot
+    for ax in g.axes.flat:
+        ax.axvline(50, color='red', linestyle='--', linewidth=1.5, label='20Hz Budget')
+        ax.set_xlabel("Time (ms)")
+        ax.set_ylabel("Density")
+        # Ensure the budget line is visible
+        curr_xlim = ax.get_xlim()
+        ax.set_xlim(0, max(60, curr_xlim[1]))
+
+    g.add_legend(title="Algorithm")
+    g.set_titles("{col_name}")
     
-    plt.title(f"Latency Distribution & PDF: {phase_name}", fontsize=16, pad=20)
-    plt.xlabel("Total Execution Time (ms)", fontsize=13)
-    plt.ylabel("Frequency / Density", fontsize=13)
+    plt.subplots_adjust(top=0.9)
+    g.fig.suptitle(f"Latency Probability Density (PDF) by Algorithm: {phase_name}", fontsize=16)
     
-    # Set x-axis limit to focus on relevant range (0-60ms)
-    plt.xlim(0, max(60, df['total_ms'].quantile(0.99) * 1.2))
+    plt.savefig(os.path.join(output_dir, "latency_distribution_faceted.png"), dpi=300)
+    plt.close()
+
+def plot_p99_breakdown(df, phase_name, output_dir):
+    """
+    Generates a stacked bar chart showing the P99 (99th percentile) latency for each phase.
+    """
+    phases = ['conversion_ms', 'deskewing_ms', 'ground_removal_ms', 'clustering_ms', 'merging_ms', 'estimation_ms', 'duplicate_ms']
+    available = [p for p in phases if p in df.columns]
     
-    plt.legend(title="Algorithm", bbox_to_anchor=(1.05, 1), loc='upper left')
-    plt.grid(True, which='both', linestyle='--', alpha=0.5)
+    # Calculate P99 for each phase per algorithm
+    p99_data = []
+    for algo in df['algorithm'].unique():
+        algo_df = df[df['algorithm'] == algo]
+        row = {'algorithm': algo}
+        for p in available:
+            row[p] = np.percentile(algo_df[p], 99)
+        p99_data.append(row)
+    
+    p99_df = pd.DataFrame(p99_data)
+    
+    fig, ax = plt.subplots(figsize=(12, 7))
+    bottom = np.zeros(len(p99_df))
+    colors = sns.color_palette("rocket", len(available))
+    
+    for col, color in zip(available, colors):
+        label = col.replace('_ms', '').replace('_', ' ').capitalize()
+        ax.bar(p99_df['algorithm'], p99_df[col], bottom=bottom, label=label, color=color)
+        bottom += p99_df[col].values
+    
+    plt.axhline(50, color='red', linestyle='--', linewidth=2, label='20Hz Budget (50ms)')
+    plt.title(f"Worst-Case (P99) Latency Breakdown: {phase_name}", fontsize=14)
+    plt.ylabel("P99 Time (ms)")
+    plt.xlabel("Algorithm Configuration")
+    plt.legend(title="Pipeline Stage", bbox_to_anchor=(1.05, 1), loc='upper left')
+    plt.grid(axis='y', linestyle='--', alpha=0.7)
     plt.tight_layout()
     
-    plt.savefig(os.path.join(output_dir, "latency_distribution_pdf.png"), dpi=300)
+    plt.savefig(os.path.join(output_dir, "latency_breakdown_p99.png"), dpi=300)
     plt.close()
 
 def generate_phase_plots(df, phase_name, output_subdir):
@@ -140,10 +175,10 @@ def generate_phase_plots(df, phase_name, output_subdir):
     plt.savefig(os.path.join(phase_dir, "latency_boxplot.png"), dpi=300)
     plt.close()
 
-    # 2. PDF & Histogram
+    # 2. PDF & Faceted Histograms
     plot_distributions(df, phase_name, phase_dir)
 
-    # 3. Stacked Bar (Phase Breakdown)
+    # 3. Stacked Bar (Average Breakdown)
     phases = ['conversion_ms', 'deskewing_ms', 'ground_removal_ms', 'clustering_ms', 'merging_ms', 'estimation_ms', 'duplicate_ms']
     available = [p for p in phases if p in df.columns]
     avg_times = df.groupby('algorithm')[available].mean().reset_index()
@@ -156,15 +191,18 @@ def generate_phase_plots(df, phase_name, output_subdir):
         ax.bar(avg_times['algorithm'], avg_times[col], bottom=bottom, label=label, color=color)
         bottom += avg_times[col].values
     
-    plt.title(f"Execution Breakdown (Average): {phase_name}", fontsize=14)
-    plt.ylabel("Time (ms)")
+    plt.title(f"Average Latency Breakdown: {phase_name}", fontsize=14)
+    plt.ylabel("Average Time (ms)")
     plt.xlabel("Algorithm Configuration")
     plt.legend(title="Pipeline Stage", bbox_to_anchor=(1.05, 1), loc='upper left')
     plt.tight_layout()
-    plt.savefig(os.path.join(phase_dir, "latency_breakdown.png"), dpi=300)
+    plt.savefig(os.path.join(phase_dir, "latency_breakdown_avg.png"), dpi=300)
     plt.close()
 
-    # 4. Stability (Cones detected over time)
+    # 4. Stacked Bar (P99 Breakdown)
+    plot_p99_breakdown(df, phase_name, phase_dir)
+
+    # 5. Stability (Cones detected over time)
     plt.figure(figsize=(12, 6))
     sns.lineplot(data=df, x="frame_id", y="cones_detected", hue="algorithm", alpha=0.7)
     plt.title(f"Detection Stability: {phase_name}", fontsize=14)
