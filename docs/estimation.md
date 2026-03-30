@@ -1,48 +1,31 @@
-# Estimation (Cone Classification)
+# Geometric Estimation and Cone Classification
 
-L'ultima fase della nostra pipeline riceve i cluster di punti (oggetti candidati) e decide quali sono effettivamente coni, calcolandone la posizione (XYZ) e il colore. Qui la precisione è critica per evitare che l'auto sterzi verso un marciapiede scambiandolo per un cono.
+## Theoretical Overview
+The estimation stage evaluates candidate clusters $\mathcal{C}_k$ using geometric primitives and statistical features to determine the probability of them being traffic cones.
 
-## 1. Algoritmi Implementati
+### Covariance-Based Shape Analysis
+We perform Eigen-decomposition on the 3D covariance matrix $\Sigma$ of each cluster:
+$$\Sigma = \frac{1}{n} \sum_{i=1}^{n} (p_i - \bar{p})(p_i - \bar{p})^T$$
+From the resulting eigenvalues $\lambda_1 \geq \lambda_2 \geq \lambda_3$, we derive local descriptors:
+1.  **Linearity ($L$):** $(\lambda_1 - \lambda_2) / \lambda_1$ (Detects posts/poles).
+2.  **Planarity ($P$):** $(\lambda_2 - \lambda_3) / \lambda_1$ (Detects walls/surfaces).
+3.  **Scattering ($S$):** $\lambda_3 / \lambda_1$ (Ensures volumetric consistency).
 
-Il progetto utilizza l'interfaccia `EstimatorInterface` per implementare diverse strategie di classificazione:
+## Implementation Optimizations
 
-### 1.1 Rule-Based Estimator (Avanzato)
-Usa regole geometriche e statistiche sui cluster per validare la loro forma.
-*   **Complessità:** $O(N)$ (lineare).
-*   **Idea:** Un cono ha dimensioni specifiche (circa 22.8cm di base e 32.5cm di altezza). Verifichiamo il bounding box (larghezza, altezza) e il rapporto tra i due (Aspect Ratio).
-*   **Evoluzione (Soglie Dinamiche):** Poiché a 15m un cono ha meno punti e sembra più piccolo, le soglie scalano in base alla distanza radiale ($r$) dal sensore.
-*   **PCA Integrated:** Utilizza l'Analisi delle Componenti Principali per scartare oggetti lineari (paletti, gambe) o piatti (muri).
+### 1. Direct Eigen-Solver vs. General PCA
+Standard PCL PCA classes are designed for general-purpose applications and include projection steps that are redundant for our needs. Our implementation uses `Eigen::SelfAdjointEigenSolver` directly on the $3 \times 3$ covariance matrix.
+*   **Justification**: For small clusters (typical of cones, 3-30 points), the direct solver is significantly more efficient and avoids unnecessary memory allocations.
 
-### 1.2 Model Fitting Estimator (RANSAC)
-Cerca di fittare un modello geometrico noto (Cilindro o Cono) sui punti del cluster.
-*   **Complessità:** $O(I \cdot N)$ (dove $I$ sono le iterazioni di RANSAC).
-*   **Idea:** Un oggetto è un cono se un'alta percentuale dei suoi punti (inliers) cade sulla superficie di un cilindro di raggio noto (circa 11.4cm).
-*   **Vantaggi:** Molto robusto ai cluster sporchi (punti di terreno residui o rumore).
-*   **Limiti:** Più lento del Rule-Based, richiede molti punti per un fitting affidabile.
+### 2. Bounding Box Early-Exit
+Before performing the computationally expensive Eigen-decomposition, a preliminary geometric check is performed:
+*   **Rule**: Scart candidates where $Height \notin [H_{min}, H_{max}]$ or $Width > W_{max}$.
+*   **Justification**: Reduces the number of clusters undergoing PCA by filter out large environmental structures (walls, cars) or ground artifacts in $O(N)$ time.
 
----
+### 3. Voxel-Aware Thresholding
+Due to the mandatory 5cm voxelization in the preprocessing stage, the dynamic point count threshold is capped:
+$$\text{TargetPoints} = \min(30, \max(3, \text{PointsAt10m} \cdot \frac{100}{r^2}))$$
+*   **Justification**: A cone has a finite surface area. With 5cm voxels, it cannot physically contain more than ~30 points. Capping this expectation prevents the misclassification of close-range cones.
 
-## 2. Analisi PCA (Principal Component Analysis)
-
-La PCA è la nostra arma "state-of-the-art" per la classificazione leggera. Calcoliamo gli autovalori ($\lambda_1, \lambda_2, \lambda_3$) della matrice di covarianza del cluster:
-
-1.  **Linearity ($L$):** $(\lambda_1 - \lambda_2) / \lambda_1$. Se $L > 0.8$, l'oggetto è una linea (es. gamba o paletto).
-2.  **Planarity ($P$):** $(\lambda_2 - \lambda_3) / \lambda_1$. Se $P > 0.8$, l'oggetto è un piano (es. pezzo di muro).
-3.  **Scatter ($S$):** $\lambda_3 / \lambda_1$. Se $S$ è bilanciato, l'oggetto è volumetrico (un vero cono ha $S > 0.05$).
-
----
-
-## 3. Parametri e Influenza sul Sistema
-
-| Parametro | Descrizione | Influenza sulla Variazione |
-| :--- | :--- | :--- |
-| `rule_min_height` / `rule_max_height` | Limiti in Z del cono (m). | Fondamentale per scartare piccoli detriti o persone alte. |
-| `rule_min_points_at_10m` | Punti minimi attesi a 10 metri. | Parametro chiave per il richiamo (Recall). Se troppo alto, i coni lontani spariscono. |
-| `rule_dynamic_width_decay` | Riduzione della larghezza minima con $r$. | Compensa la divergenza dei raggi del LiDAR a lunga distanza. |
-| `pca_max_linearity` | Soglia per scartare oggetti lineari. | Più bassa è, più rigido è lo scarto delle gambe o paletti. |
-| `pca_min_scatter` | Soglia per assicurare tridimensionalità. | Se troppo alta, scarta coni visti da pochi angoli. |
-| `ransac_min_inlier_ratio` | (RANSAC) % punti sul cilindro. | Definisce la confidenza del fitting geometrico. |
-
----
-
-
+## Classification Logic
+The system currently employs a **Rule-Based Bayesian-like** approach where geometric features (PCA, Dimensions, Intensity) are weighed to generate a confidence score $\Psi \in [0, 1]$.

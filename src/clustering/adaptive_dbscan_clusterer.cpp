@@ -14,8 +14,9 @@ void AdaptiveDBSCANClusterer::cluster(const PointCloudPtr& cloud, std::vector<Po
 
     const int n_points = static_cast<int>(cloud->size());
     
-    // 1. Flat Grid 3D for FAST proximity lookup
-    // Since epsilon is dynamic, we use a grid size based on max expected epsilon
+    // Phase 1: Spatial Grid Initialization
+    // To maintain O(1) search complexity with a dynamic epsilon, the grid resolution is 
+    // conservatively set based on the maximum expected epsilon at the 25m range cutoff.
     const float max_expected_eps = eps_base_ + alpha_ * 25.0f;
     const float inv_grid_size = 1.0f / max_expected_eps;
 
@@ -24,6 +25,7 @@ void AdaptiveDBSCANClusterer::cluster(const PointCloudPtr& cloud, std::vector<Po
     const int dim_xy = static_cast<int>(2.0f * range_xy * inv_grid_size) + 1;
     const int dim_z = static_cast<int>(2.0f * range_z * inv_grid_size) + 1;
 
+    // Pre-allocated "Hash-Killer" Flat Grid to ensure deterministic O(N) population.
     std::vector<std::vector<int>> grid(dim_xy * dim_xy * dim_z);
 
     auto get_grid_idx = [&](float x, float y, float z) {
@@ -43,7 +45,9 @@ void AdaptiveDBSCANClusterer::cluster(const PointCloudPtr& cloud, std::vector<Po
     int current_cluster_id = 0;
     std::queue<int> seed_queue;
 
-    // Helper to calculate distance-aware min_pts and epsilon
+    // Phase 2: Dynamic Parameter Modeling
+    // Epsilon expands linearly with range, while MinPts decays exponentially to compensate 
+    // for sparser point density at long distances.
     auto get_params = [&](const PointT& pt) {
         float r = std::sqrt(pt.x * pt.x + pt.y * pt.y);
         float eps = eps_base_ + alpha_ * r;
@@ -61,6 +65,7 @@ void AdaptiveDBSCANClusterer::cluster(const PointCloudPtr& cloud, std::vector<Po
         int gy = static_cast<int>((pt.y + range_xy) * inv_grid_size);
         int gz = static_cast<int>((pt.z + range_z) * inv_grid_size);
 
+        // Check the 27-cell neighborhood in the flat grid.
         for (int x = gx - 1; x <= gx + 1; ++x) {
             if (x < 0 || x >= dim_xy) continue;
             for (int y = gy - 1; y <= gy + 1; ++y) {
@@ -86,13 +91,14 @@ void AdaptiveDBSCANClusterer::cluster(const PointCloudPtr& cloud, std::vector<Po
     std::vector<int> neighbor_indices;
     neighbor_indices.reserve(200);
 
+    // Phase 3: Adaptive Cluster Expansion
     for (int i = 0; i < n_points; ++i) {
         if (labels[i] != -1) continue;
 
         int min_p = get_neighbors(i, neighbor_indices);
 
         if (static_cast<int>(neighbor_indices.size()) < min_p) {
-            labels[i] = -2;
+            labels[i] = -2; // Outlier classification
             continue;
         }
 
@@ -123,7 +129,7 @@ void AdaptiveDBSCANClusterer::cluster(const PointCloudPtr& cloud, std::vector<Po
         current_cluster_id++;
     }
 
-    // Extraction
+    // Phase 4: Cluster Extraction and Cardinality Filtering
     std::vector<PointCloudPtr> temp_clusters(current_cluster_id);
     for (int i = 0; i < current_cluster_id; ++i) temp_clusters[i].reset(new PointCloud);
     for (int i = 0; i < n_points; ++i) if (labels[i] >= 0) temp_clusters[labels[i]]->push_back(cloud->points[i]);

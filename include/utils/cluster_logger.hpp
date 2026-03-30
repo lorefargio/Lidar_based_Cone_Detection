@@ -9,33 +9,33 @@ namespace fs_perception {
 
 /**
  * @class ClusterLogger
- * @brief Records geometric and statistical features of detected cones to a CSV file.
+ * @brief Diagnostic utility for recording high-dimensional cluster features.
  * 
- * This utility allows for offline analysis of cone characteristics to help
- * fine-tune clustering and classification parameters.
+ * Facilitates offline experimental analysis by exporting geometric and statistical 
+ * descriptors of detected clusters to a structured CSV format.
  */
 class ClusterLogger {
 public:
     /**
-     * @brief Constructor for ClusterLogger.
-     * @param algo_name Name of the clustering algorithm being used (for file naming).
+     * @brief Construct a new Cluster Logger object.
+     * @param algo_name Descriptor for the clustering algorithm under test.
      */
     ClusterLogger(const std::string& algo_name);
 
     /**
-     * @brief Destructor. Ensures the file is flushed and closed.
+     * @brief Flushes pending data and ensures file integrity on shutdown.
      */
     ~ClusterLogger();
 
     /**
-     * @brief Adds a cluster's features to the internal buffer.
-     * @param features The extracted features of a detected cone.
+     * @brief Buffers a cluster's feature set for eventual serialization.
+     * @param features Struct containing geometric, intensity, and PCA descriptors.
      */
     void addCluster(const ClusterFeatures& features);
 
     /**
-     * @brief Saves all collected cluster data to a CSV file.
-     * @param filepath System path where the CSV will be saved.
+     * @brief Serializes all buffered cluster features to a CSV file.
+     * @param filepath Target system path for the output CSV.
      */
     void saveToCSV(const std::string& filepath);
 

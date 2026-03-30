@@ -1,55 +1,36 @@
-# Formula Student LiDAR Perception 
+# High-Performance LiDAR Perception for Autonomous Racing
 
-Questo pacchetto implementa una pipeline di percezione LiDAR ad alte prestazioni per veicoli Formula Student, ottimizzata per l'identificazione rapida di coni in scenari dinamici.
+## Abstract
+This repository implements a modular, high-performance perception system designed for track-boundary localization (traffic cones) in Formula Student Driverless environments. The system is engineered for **Humble ROS 2** and optimized for a 20Hz update rate. The core architecture prioritizes deterministic execution, O(1) spatial indexing, and SIMD-accelerated transformations to facilitate robust control in high-speed maneuvers.
 
----
+## System Architecture
+The pipeline is structured as a sequential execution model with the following stages:
 
-## 🏗 Architettura della Pipeline
+1.  **Preprocessing & Motion Compensation**: Implements non-linear temporal interpolation (Nlerp) for LiDAR deskewing and mandatory early voxelization to ensure cardinality bounds for downstream stages.
+2.  **Adaptive Ground Segmentation**: Employs **Patchwork++** (Lee et al., 2022) and Radial Slope Analysis to isolate non-ground obstacles while preserving base-points at high radial ranges.
+3.  **Spatial Grouping (Clustering)**: Utilizes Optimized DBSCAN and Connected Components, accelerated via **Flat 3D Grid Indexing** to eliminate KD-Tree reconstruction and hashing overhead.
+4.  **Geometric Estimation & Classification**: Performs covariance-based shape analysis (PCA) and rule-based validation with dynamic distance-aware thresholds.
 
-La pipeline è suddivisa in quattro stadi sequenziali e modulari:
+## Technical Documentation
+For detailed theoretical derivation and implementation justifications, refer to the following documents:
 
-1.  **[LiDAR Deskewing](docs/deskewing.md):** Correzione della distorsione temporale dei punti tramite interpolazione Slerp (400Hz IMU) e compensazione del braccio di leva (Lever Arm).
-2.  **[Filtering (Ground Removal)](docs/filtering.md):** Separazione del suolo dagli ostacoli (Bin-based, Slope-based).
-3.  **[Clustering (Object Grouping)](docs/clustering.md):** Raggruppamento dei punti in oggetti candidati (Grid, Euclidean, DBSCAN, Voxel).
-4.  **[Estimation (Cone Classification)](docs/estimation.md):** Validazione geometrica (Rule-based, PCA, RANSAC) e calcolo della posizione XYZ.
+*   **[LiDAR Deskewing](docs/deskewing.md)**: Motion compensation and temporal synchronization.
+*   **[Ground Segmentation](docs/filtering.md)**: Patchwork++ (CZM, RNR, R-VPF, A-GLE) and Slope Analysis.
+*   **[Spatial Clustering](docs/clustering.md)**: O(1) Hash-Grid DBSCAN and Adaptive Density models.
+*   **[Geometric Estimation](docs/estimation.md)**: Covariance analysis and voxel-aware classification.
+*   **[System Configuration](docs/parameters.md)**: Comprehensive guide to runtime parameters and YAML tuning.
+*   **[Performance Benchmarking](docs/benchmarking.md)**: Methodology for P99 and PDF latency analysis.
 
----
+## Core Optimization Principles
+*   **Memory Safety**: Persistent buffer reuse and zero-copy publishing (move semantics) to minimize heap fragmentation.
+*   **Algorithmic Determinism**: Transition from $O(N \log N)$ to $O(N)$ via flat-grid spatial partitioning.
+*   **Real-Time QoS**: Utilization of `SensorDataQoS` and decimation-based debug publishing to ensure bandwidth availability for safety-critical topics.
 
-## 🏎 Setup Hardware: Bi-Mensola (ZED2 + Hesai)
-
-Il sistema è ottimizzato per un setup a supporto rigido ancorato al monoscocca in fibra di carbonio. 
-*   **Sincronizzazione:** Pre-processing degli orientamenti IMU direttamente nel frame LiDAR per minimizzare il carico CPU (Manual Config).
-*   **Compensazione Traslazionale:** Gestione dell'offset fisico tra la mensola della camera e quella del LiDAR per correggere le accelerazioni indotte dal beccheggio/rollio.
-
-![Setup di testing e raccolta dati](/docs/testing_setup.jpg)
-
-
----
-
-## 🚀 Guida Rapida all'Esecuzione
-
-### Esecuzione Standard 
+## Build and Execution
 ```bash
-ros2 launch fs_lidar_perception foxglove.launch.py \
-    use_deskewing:=true \
-    imu_topic:=/zed/zed_node/imu/data \
-    clustering_algorithm:=voxel
+# Optimized build for release
+colcon build --cmake-args -DCMAKE_BUILD_TYPE=Release
+
+# Execution
+ros2 launch fs_lidar_perception foxglove.launch.py ground_remover_type:=patchworkpp
 ```
-
-### Configurazione Parametri
-Tutte le impostazioni del sistema (soglie, algoritmi, calibrazioni) sono documentate qui:
-👉 **[Guida ai Parametri di Launch](docs/parameters.md)**
-
----
-
-## ⏱ Benchmarking e Performance
-
-Il progetto include un profiler integrato che salva i dati di latenza in `log_profiler/`.
-*   **Target Real-Time:** 20Hz (50ms budget totale).
-*   **Overhead Deskewing:** < 2ms (grazie all'ottimizzazione SIMD di Eigen e al pre-processing IMU).
-
----
-
-## 🛠 Prossimi Sviluppi
-*   **Calibrazione Fine:** Inserimento delle misure CAD precise per il braccio di leva IMU-LiDAR.
-*   **Tuning:** Ottimizzazione delle soglie dei vari algoritmi.

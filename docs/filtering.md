@@ -1,42 +1,32 @@
-# Filtering (Ground Removal)
+# Ground Segmentation and Surface Estimation Analysis
 
-La fase di filtering è il primo stadio della nostra pipeline di percezione. Il suo scopo principale è separare i punti appartenenti al terreno da quelli che rappresentano ostacoli (come i coni). In questa fase, la precisione è fondamentale: rimuovere troppi punti può "tagliare" la base del cono rendendo difficile il clustering, mentre rimuoverne troppo pochi può generare falsi ostacoli.
+## Theoretical Framework
+Ground segmentation is the foundational stage of the perception pipeline, tasked with the binary classification of the point cloud $\mathcal{P}$ into ground $\mathcal{P}_g$ and non-ground $\mathcal{P}_o$ subsets. This implementation investigates the efficacy of geometric heuristics versus iterative plane-fitting models in high-dynamic environments.
 
-## 1. Algoritmi Implementati
+### 1. Patchwork++: Adaptive and Robust Segmentation
+Following the methodology proposed by Lee et al. (2022), Patchwork++ addresses the limitations of deterministic ground models (e.g., standard GPF or RANSAC) through a multi-stage adaptive process.
 
-Il progetto utilizza un'architettura modulare (`GroundRemoverInterface`) che permette di scegliere tra due algoritmi principali:
+#### Concentric Zone Model (CZM)
+To account for the non-uniform distribution of LiDAR points, the $\mathbb{R}^2$ plane is partitioned into concentric zones $\mathcal{Z}_m$ with varying radial and angular resolutions. This discretization mimics the sensor's angular resolution, assigning higher bin densities to the near-field where point density is maximum.
 
-### 1.1 Bin-Based Ground Remover (Classico)
-Divide la nuvola in una griglia polare (settori angolari e bin radiali). Per ogni bin, identifica il punto con l'altezza minima ($Z_{min}$) e considera terreno tutti i punti nel bin che non superano una soglia fissa rispetto a $Z_{min}$.
-*   **Complessità:** $O(N)$ - Richiede una singola iterazione sui punti.
-*   **Idea:** Basata sull'assunzione che il terreno sia localmente piatto all'interno di un piccolo bin.
-*   **Limiti:** Sensibile a rumore (outlier sotto il terreno) e non gestisce bene le pendenze.
+#### Reflected Noise Removal (RNR)
+Virtual noise points originating from multi-path reflections (e.g., off vehicle hoods) often appear below the actual ground level, biasing plane estimation. RNR identifies these outliers by evaluating the intensity $\mathcal{I}$ and vertical coordinate $z$ of points in the bottom sensor rings:
+$$\text{Noise if } z < h_{noise} \text{ and } \mathcal{I} < I_{noise}$$
+where $h_{noise}$ is adaptively updated via A-GLE.
 
-### 1.2 Slope-Based Ground Remover
-Analizza i punti lungo i canali radiali. Calcola la pendenza (slope) tra punti consecutivi in ordine di distanza dal sensore.
-*   **Complessità:** $O(N \log N)$ (a causa dell'ordinamento radiale dei settori).
-*   **Idea:** Se la pendenza tra due punti adiacenti è piccola, entrambi appartengono al suolo. Se c'è un salto brusco in $Z$, il punto più lontano è un ostacolo.
-*   **Vantaggi:** Molto più preciso nel preservare la base dei coni, poiché riconosce la variazione improvvisa di pendenza tra asfalto e cono.
+#### Region-wise Vertical Plane Fitting (R-VPF)
+In urban or racing environments with vertical structures (e.g., retaining walls), standard Ground Plane Fitting (GPF) may treat wall-points as ground-seeds. R-VPF mitigates this by iteratively identifying vertical components through PCA and removing them from the bin-subset before final ground estimation.
 
+#### Adaptive Ground Likelihood Estimation (A-GLE)
+Rather than using static thresholds, A-GLE dynamically updates the elevation ($e_{\tau,m}$) and flatness ($f_{\tau,m}$) parameters for each zone $\mathcal{Z}_m$ based on the distribution of "definite ground" in previous frames. This enables the system to adapt to varying terrain types (e.g., transitioning from flat asphalt to bumpy grass).
 
----
+### 2. Radial Slope Analysis (Slope-Based)
+As an alternative to iterative fitting, this module evaluates the local geometric gradient $\nabla z$ along radial sectors.
+*   **Mathematical Logic**: Given sorted points $\{p_1, \dots, p_n\}$ in a sector, $p_j$ is classified as ground if the slope $\alpha$ relative to the last confirmed ground point $p_{ref}$ satisfies:
+    $$\alpha = \frac{|p_{j,z} - p_{ref,z}|}{||p_{j,xy} - p_{ref,xy}||} < \alpha_{max}$$
+*   **Complexity**: $O(N \log N)$ due to the necessity of radial sorting per sector.
+*   **Performance Note**: While less robust to noise than Patchwork++, the Slope-based approach provides lower latency and is highly effective for detecting the abrupt transition between the track and the cone base.
 
-## 2. Parametri e Influenza sul Sistema
-
-Tutti i parametri sono configurabili tramite file di launch:
-
-| Parametro | Descrizione | Influenza sulla Variazione |
-| :--- | :--- | :--- |
-| `sensor_z` | Altezza del LiDAR dal suolo (default: -0.52m). | Se errato, l'intera pipeline fallisce ignorando o tagliando i coni. |
-| `slope_max_slope` | (Slope-based) Pendenza massima del suolo. | Aumentarlo permette di rilevare terreni più ripidi, ma rischia di includere basi di oggetti. |
-| `bin_local_threshold` | (Bin-based) Altezza minima sopra il punto più basso. | Troppo alta: si perdono piccoli ostacoli. Troppo bassa: la polvere o il rumore diventano ostacoli. |
-| `pw_th_dist` | (Patchwork++) Soglia di distanza dal piano. | Definisce la precisione del fit del terreno. |
-
----
-
-## 3. Confronto Tecnico
-
-| Algoritmo | Velocità | Robustezza | Casi d'Uso |
-| :--- | :--- | :--- | :--- |
-| **Bin-Based** | Test rapidi, terreni perfettamente piatti. |
-| **Slope-Based**| Setup standard, necessità di preservare basi dei coni. |
+## Implementation Optimizations for Real-Time Control
+1.  **Ordered Pre-processing**: Truncation and NaN removal are performed *prior* to any segmentation to ensure the VoxelGrid indices remain within integer bounds, preventing index overflow and associated I/O overhead.
+2.  **Buffer Persistence**: All segmentation modules utilize pre-allocated, persistent memory structures to avoid the non-deterministic latency associated with runtime heap allocations.

@@ -40,11 +40,13 @@ void SlopeBasedGroundRemover::removeGround(const PointCloudConstPtr& cloud_in, P
     cloud_ground->points.reserve(cloud_in->size());
 
     // Phase 2: Perform slope-based analysis for each sector independently
+    // This allows for parallel processing of different angular segments.
     for (int s = 0; s < config_.segments; ++s) {
         auto& sector_indices = sectors_[s];
         if (sector_indices.empty()) continue;
 
-        // Sort sector points by radial distance for consecutive comparison
+        // Radial Sorting: Crucial for the 1D slope traversal. Sorting by distance 
+        // allows the algorithm to incrementally 'climb' the terrain.
         std::sort(sector_indices.begin(), sector_indices.end(), [&](int a, int b) {
             const auto& pt_a = cloud_in->points[a];
             const auto& pt_b = cloud_in->points[b];
@@ -65,6 +67,8 @@ void SlopeBasedGroundRemover::removeGround(const PointCloudConstPtr& cloud_in, P
             }
 
             // Slope logic: compare relative height (dz) and radial distance (dr)
+            // Points are classified as ground if the slope (dz/dr) is low, 
+            // indicating a smooth surface even if that surface is inclined.
             float dr = current_r - last_ground_r;
             float dz = std::abs(pt.z - last_ground_z);
 

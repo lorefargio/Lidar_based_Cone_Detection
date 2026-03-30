@@ -7,6 +7,15 @@
 // patchworkpp_ground_remover.hpp
 namespace fs_perception {
 
+/**
+ * @class PatchworkppGroundRemover
+ * @brief High-performance ground removal using the Patchwork++ algorithm.
+ * 
+ * Patchwork++ is a state-of-the-art ground segmentation algorithm that handles 
+ * non-flat terrain and complex environments using Concentric Zone Model (CZM) 
+ * and Region-wise Ground Fitting (RGF). This class provides a PCL-compatible 
+ * wrapper around the core implementation.
+ */
 class PatchworkppGroundRemover : public GroundRemoverInterface {
 public:
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW

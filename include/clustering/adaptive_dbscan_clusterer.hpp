@@ -8,20 +8,25 @@ namespace fs_perception {
 
 /**
  * @class AdaptiveDBSCANClusterer
- * @brief Lightweight replacement for HDBSCAN that adjusts epsilon based on distance.
+ * @brief Distance-Aware Density-Based Spatial Clustering of Applications with Noise (DBSCAN).
  * 
- * This algorithm dynamically scales the DBSCAN epsilon radius based on the point's distance 
- * from the sensor, effectively handling the variable point density characteristic of LiDAR scans.
+ * To compensate for LiDAR beam divergence and the resulting decrease in point density at high 
+ * ranges, this implementation employs a dynamic parameter model. Epsilon scales linearly 
+ * with radial distance $r$: $\epsilon(r) = \epsilon_{base} + \alpha r$.
+ * 
+ * Like the standard DBSCANClusterer, it utilizes a "Hash-Killer" Pre-allocated 3D Flat Grid 
+ * to achieve $O(1)$ amortized neighbor lookup, ensuring real-time performance on high-resolution 
+ * point clouds.
  */
 class AdaptiveDBSCANClusterer : public ClustererInterface {
 public:
     /**
-     * @brief Constructor for AdaptiveDBSCANClusterer.
-     * @param eps_base Base epsilon radius at 0m distance.
-     * @param alpha Growth factor for epsilon based on radial distance.
-     * @param min_pts Minimum points required to form a dense region (core point).
-     * @param min_cluster_size Minimum points required to consider a cluster valid.
-     * @param max_cluster_size Maximum points allowed in a cluster.
+     * @brief Constructs an AdaptiveDBSCANClusterer with distance-scaling hyperparameters.
+     * @param eps_base Base epsilon radius $\epsilon_{base}$ at the sensor origin ($r=0$).
+     * @param alpha Growth coefficient $\alpha$ governing the expansion of $\epsilon$ per meter of range.
+     * @param min_pts Minimum neighbor count $\kappa$ required for core point classification.
+     * @param min_cluster_size Minimum cardinality filter for valid clusters.
+     * @param max_cluster_size Maximum cardinality filter to exclude merged or large-scale obstacles.
      */
     AdaptiveDBSCANClusterer(float eps_base = 0.15f, float alpha = 0.015f, int min_pts = 3, 
                             int min_cluster_size = 3, int max_cluster_size = 500);

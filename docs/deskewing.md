@@ -1,44 +1,28 @@
-# LiDAR Deskewing Module
+# Motion Compensation and LiDAR Deskewing
 
-## 1. Il Problema: Motion Distortion
-Nelle competizioni Formula Student, il veicolo si muove a velocità elevate (fino a 100+ km/h). Un LiDAR rotativo (come l'Hesai Pandar40P) non acquisisce tutti i punti di un frame nello stesso istante: effettua una scansione a 360° che dura circa 50-100ms (10-20Hz).
+## Theoretical Overview
+LiDAR sensors acquire points sequentially over a sweep duration $T_{sweep}$. For a vehicle moving at high velocity $v$, points acquired at $t=0$ and $t=T_{sweep}$ are spatially inconsistent. This distortion (skewing) can lead to significant localization errors and PCA failure in classification.
 
-Se l'auto ruota o trasla durante questa scansione, la nuvola di punti risultante appare "distorta" (skewed). Ad esempio, un cono perfettamente circolare potrebbe apparire allungato o sfasato, portando a errori nella stima della posizione e della forma (PCA fallisce).
+### Mathematical Formulation
+For each point $p_i$ acquired at time $t_i \in [t_{start}, t_{end}]$, we compute the relative rotation $\Delta \mathbf{R}_i$ from the IMU data:
+$$\Delta \mathbf{R}_i = \mathbf{Q}_{start}^{-1} \cdot \mathbf{Q}_{interp}(t_i)$$
+The corrected point $p_i'$ is calculated as:
+$$p_i' = \Delta \mathbf{R}_i \cdot (p_i + \mathbf{L}) - \mathbf{L}$$
+where $\mathbf{L}$ is the lever-arm vector between the IMU and LiDAR centers.
 
-## 2. La Soluzione: Deskewing
-Il modulo `Deskewer` corregge questa distorsione utilizzando i dati ad alta frequenza (400Hz) dell'IMU della ZED.
+## Implementation Specifics
 
-### 2.1 Interpolazione Temporale (Slerp)
-Il LiDAR fornisce un timestamp preciso per **ogni singolo punto** (`PointXYZIRT.timestamp`). Poiché i messaggi IMU arrivano in momenti diversi rispetto ai punti LiDAR, utilizziamo la **Spherical Linear Interpolation (Slerp)** per stimare l'orientamento esatto del veicolo all'istante di acquisizione di ogni punto.
+### 1. Fast NLERP Interpolation
+While Spherical Linear Interpolation (Slerp) is mathematically rigorous, our implementation utilizes **Normalized Linear Interpolation (Nlerp)** for point-wise correction.
+*   **Justification**: For the small angular intervals between high-frequency IMU samples (400Hz), Nlerp is visually indistinguishable from Slerp but avoids the expensive trigonometric functions required by the latter.
 
-$$q_{interp} = Slerp(q_{before}, q_{after}, \alpha)$$
-dove $\alpha$ è il fattore di interpolazione temporale.
+### 2. SIMD-Parallelized Transformation Loop
+The transformation loop is the primary candidate for SIMD optimization. We use **OpenMP** (`#pragma omp parallel for`) to distribute point corrections across CPU cores.
+*   **Optimization**: We leverage Eigen's alignment and SSE/AVX instructions to ensure that the coordinate rotation $\mathbf{R} \cdot p$ is performed in parallel.
 
-### 2.2 Trasformazione Relativa
-Invece di trasformare i punti in un frame globale (che introdurrebbe drift), calcoliamo il movimento relativo del veicolo rispetto all'inizio della scansione del LiDAR ($t_{start}$).
+### 3. Monotonic Timestamp Search
+To find the bounding IMU samples for a given $t_i$, we exploit the chronological order of LiDAR points. Instead of binary search $O(N \log M)$, we use a **Moving Iterator** search $O(N + M)$.
+*   **Justification**: Reduces the average search time to $O(1)$ per point, ensuring that deskewing overhead remains below 2ms.
 
-1.  Determiniamo l'orientamento all'inizio del frame: $q_{start}$.
-2.  Per ogni punto al tempo $t_p$:
-    *   Otteniamo $q_p$ tramite interpolazione.
-    *   Calcoliamo la rotazione relativa: $\Delta q = q_{start}^{-1} \cdot q_p$.
-    *   Applichiamo la rotazione al punto: $P_{corrected} = \Delta q \cdot P_{raw}$.
-
-## 3. Integrazione nel Sistema
-Il modulo è implementato come una classe utility utilizzata dal `LidarPerceptionNode`.
-*   **Input:** Messaggi `sensor_msgs/msg/Imu` (bufferizzati in una coda).
-*   **Processo:** Viene chiamato immediatamente dopo la conversione del messaggio PointCloud2, prima di qualsiasi fase di filtraggio o clustering.
-*   **Performance:** Utilizza Eigen per operazioni vettoriali ottimizzate e un buffer thread-safe.
-
-## 4. Parametri e Configurazione
-
-| Parametro | Default | Descrizione |
-| :--- | :--- | :--- |
-| `use_deskewing` | `true` | Abilita/Disabilita l'intero modulo. |
-| `imu_topic` | `/zed/zed_node/imu/data` | Topic IMU per i dati di orientamento. |
-| `deskew_use_translation` | `true` | Se attivo, compensa il movimento lineare indotto dalla rotazione (lever arm). |
-| `static_imu_to_lidar_xyz` | `[0,0,0]` | Vettore di traslazione tra IMU e LiDAR (m). |
-
-## 5. Requisiti Hardware
-*   LiDAR con supporto ai timestamp per punto.
-*   IMU a bassa latenza (consigliata > 200Hz).
-
+## Rigorous Synchronization
+The system requires PTP/NTP synchronization between the LiDAR and the host PC. A drift of $>5ms$ in timestamps would invalidate the motion compensation, leading to increased perception jitter.

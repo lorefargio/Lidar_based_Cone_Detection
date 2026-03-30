@@ -10,9 +10,13 @@ namespace fs_perception {
  * @class SlopeBasedGroundRemover
  * @brief Ground removal algorithm based on radial slope analysis.
  * 
- * Analyzes points in radial sectors and sorts them by distance. It calculates 
- * the slope between consecutive points and classifies them as ground if 
- * the slope is within a certain threshold, effectively handling terrain slopes.
+ * This algorithm operates in two main stages for efficiency and robustness:
+ * 1. **Angular Binning**: The point cloud is partitioned into vertical wedges (sectors)
+ *    to reduce the complexity of the global problem into independent 1D problems.
+ * 2. **Radial Slope Logic**: Points in each sector are sorted by distance from the 
+ *    sensor. The slope (dz / dr) between consecutive points is compared against 
+ *    thresholds. This allows the algorithm to follow terrain gradients (e.g., track 
+ *    inclines) instead of using a global height cutoff.
  */
 class SlopeBasedGroundRemover : public GroundRemoverInterface {
 public:

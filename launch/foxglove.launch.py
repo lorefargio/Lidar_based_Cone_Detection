@@ -42,6 +42,7 @@ def generate_launch_description():
     rule_decay_arg = DeclareLaunchArgument('rule_dynamic_width_decay', default_value='0.005')
     rule_pts_arg = DeclareLaunchArgument('rule_min_points_at_10m', default_value='5')
     log_clusters_arg = DeclareLaunchArgument('log_clusters', default_value='true')
+    debug_freq_arg = DeclareLaunchArgument('debug_pub_freq', default_value='10')
 
     # --- 6. DESKEWING & FILTERS ---
     use_deskew_arg = DeclareLaunchArgument('use_deskewing', default_value='true')
@@ -78,6 +79,7 @@ def generate_launch_description():
             'rule_dynamic_width_decay': LaunchConfiguration('rule_dynamic_width_decay'),
             'rule_min_points_at_10m': LaunchConfiguration('rule_min_points_at_10m'),
             'log_clusters': LaunchConfiguration('log_clusters'),
+            'debug_pub_freq': LaunchConfiguration('debug_pub_freq'),
             'use_deskewing': LaunchConfiguration('use_deskewing'),
             'imu_topic': LaunchConfiguration('imu_topic'),
             'use_voxel_filter': LaunchConfiguration('use_voxel_filter'),
@@ -96,10 +98,10 @@ def generate_launch_description():
             'port': 8765,
             'address': '0.0.0.0',
             'tls': False,
-            'topic_whitelist': ['.*'],
+            'topic_whitelist': ['/perception/.*', '/tf', '/tf_static', '/rosout', '/lidar_points'],
             'send_buffer_limit': 100000000,
             'use_compression': True,
-            'max_update_ms': 33, # Max ~30Hz update rate
+            'max_update_ms': 50, # 20Hz update rate matches our target
             'min_qos_depth': 1,
         }]
     )
@@ -135,6 +137,7 @@ def generate_launch_description():
         rule_decay_arg,
         rule_pts_arg,
         log_clusters_arg,
+        debug_freq_arg,
         use_deskew_arg,
         imu_topic_arg,
         use_vox_filt_arg,

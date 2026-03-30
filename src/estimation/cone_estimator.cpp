@@ -27,6 +27,8 @@ Cone ConeEstimator::estimate(const PointCloudPtr& cluster) {
     }
 
     // Phase 0: Bounding Box Early Exit (Fast O(N))
+    // This phase is essential for reducing CPU load by filtering out outliers 
+    // such as long walls or ground patches before the more expensive Covariance calculation.
     PointT min_pt, max_pt;
     pcl::getMinMax3D(*cluster, min_pt, max_pt);
     
@@ -108,11 +110,15 @@ ClusterFeatures ConeEstimator::extractFeatures(const PointCloudPtr& cluster) {
     f.bearing = std::atan2(f.y, f.x);
 
     // 2. Shape classification using direct Covariance Matrix (Fast PCA replacement)
+    // Directly compute the 3x3 symmetric covariance matrix. This avoids the high 
+    // overhead of the full SVD (Singular Value Decomposition) used in generic 
+    // PCA implementations. For small point sets like cones, this is significantly faster.
     Eigen::Matrix3f covariance_matrix;
     Eigen::Vector4f mean;
     pcl::computeMeanAndCovarianceMatrix(*cluster, covariance_matrix, mean);
 
     // Solve for eigenvalues (3x3 symmetric matrix)
+    // The eigenvalues represent the distribution variance along the principal axes.
     Eigen::SelfAdjointEigenSolver<Eigen::Matrix3f> solver(covariance_matrix);
     Eigen::Vector3f eigenvalues = solver.eigenvalues(); // Sorted in ascending order
     Eigen::Matrix3f eigenvectors = solver.eigenvectors();

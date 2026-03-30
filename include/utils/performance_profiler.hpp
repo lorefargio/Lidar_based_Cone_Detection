@@ -28,57 +28,59 @@ struct FrameData {
 
 /**
  * @class PerformanceProfiler
- * @brief High-resolution timer and data collector for benchmarking the perception pipeline.
+ * @brief High-resolution instrumentation utility for pipeline latency analysis.
  * 
- * This class tracks the execution time of each stage of the pipeline and 
- * saves the collected data to a JSON file for offline analysis.
+ * This class provides high-precision timing for sequential pipeline stages, enabling
+ * deterministic analysis of P99 latency and probability density functions (PDF).
+ * Data is accumulated in-memory to prevent filesystem I/O interference during critical paths.
  */
 class PerformanceProfiler {
 public:
     /**
-     * @brief Constructor for PerformanceProfiler.
-     * @param algorithm_name Name of the currently used algorithm (for logging purposes).
+     * @brief Construct a new Performance Profiler object.
+     * @param algorithm_name Descriptor for the current configuration (used in JSON metadata).
      */
     PerformanceProfiler(const std::string& algorithm_name);
 
     /**
-     * @brief Finalizes and closes the profiler, usually called when the node shuts down.
+     * @brief Finalizes data collection and ensures memory safety on shutdown.
      */
     ~PerformanceProfiler();
 
     /**
-     * @brief Prepares the data structure for a new incoming frame and starts the total frame timer.
+     * @brief Resets frame-specific metrics and initializes the global frame timer.
      */
     void startFrame();
 
     /**
-     * @brief Finalizes the current frame's timing and stores the detection results.
-     * @param cones Number of cones detected in this frame.
+     * @brief Records the final latency for the current frame and increments detection metrics.
+     * @param cones Number of validated cones in the current frame.
      */
     void endFrame(int cones);
 
     /**
      * @brief Starts a high-resolution timer for a specific pipeline phase.
-     * @param phase Name of the phase to profile (e.g., "ground_removal").
+     * @param phase Identifier for the stage (e.g., "clustering", "ground_removal").
      */
     void startTimer(const std::string& phase);
 
     /**
-     * @brief Stops a high-resolution timer for a specific pipeline phase.
-     * @param phase Name of the phase to stop profiling.
+     * @brief Stops the timer for a specific phase and calculates the elapsed duration in milliseconds.
+     * @param phase Identifier for the stage to stop profiling.
      */
     void stopTimer(const std::string& phase);
 
     /**
-     * @brief Gets the total latency of the last processed frame (ms).
+     * @brief Retrieves the end-to-end latency of the most recently processed frame.
+     * @return double Elapsed time in milliseconds.
      */
     double getLastFrameTotalMs() const {
         return frames_.empty() ? 0.0 : frames_.back().total_ms;
     }
 
     /**
-     * @brief Serializes all collected frame data to a JSON file.
-     * @param filepath Full system path where the JSON file will be saved.
+     * @brief Serializes the accumulated frame data to a structured JSON file for offline PDF/P99 analysis.
+     * @param filepath Target system path for the output file.
      */
     void saveToJSON(const std::string& filepath);
 

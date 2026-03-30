@@ -1,3 +1,12 @@
+/**
+ * @file ground_remover_interface.hpp
+ * @brief Abstract base class for terrain segmentation algorithms.
+ * 
+ * Provides a standardized interface for various ground removal strategies. 
+ * Efficient terrain segmentation is a foundational stage in the LiDAR perception 
+ * pipeline, enabling the isolation of potential obstacle clusters.
+ */
+
 #pragma once
 
 #include "utils/types.hpp"
@@ -6,33 +15,41 @@ namespace fs_perception {
 
 /**
  * @class GroundRemoverInterface
- * @brief Common interface for all ground removal algorithms.
+ * @brief Abstract interface defining the terrain segmentation protocol.
  * 
- * Defines the standard structure for separating ground points from obstacle points, 
- * which is the first and most critical stage of the perception pipeline.
+ * This interface establishes the contractual requirements for all ground removal 
+ * implementations, ensuring modularity and interoperability within the perception stack.
  */
 class GroundRemoverInterface {
 public:
+    /**
+     * @brief Virtual destructor to ensure proper cleanup of derived implementations.
+     */
     virtual ~GroundRemoverInterface() = default;
 
     /**
-     * @brief Configures an optional voxel filter for the obstacle output.
-     * @param leaf_size Size of the voxel (0.0 to disable).
+     * @brief Configures an optional voxel grid filter for the resulting obstacle cloud.
+     * 
+     * @param leaf_size The isotropic voxel dimension (meters). A value of 0.0 disables filtering.
      */
     void setVoxelFilter(float leaf_size) { voxel_size_ = leaf_size; }
 
     /**
-     * @brief Separates the ground points from the input cloud.
-     * @param cloud_in[in] Input point cloud (filtered for NaNs and range).
-     * @param cloud_obstacles[out] Output cloud containing obstacle candidates.
-     * @param cloud_ground[out] Output cloud containing ground points for debug visualization.
+     * @brief Performs terrain segmentation on the input point cloud.
+     * 
+     * Divides the input points into two disjoint sets: points belonging to the 
+     * traversable ground surface and points belonging to non-ground obstacles.
+     * 
+     * @param[in]  cloud_in The pre-processed input LiDAR point cloud.
+     * @param[out] cloud_obstacles The resulting subset of non-ground obstacle points.
+     * @param[out] cloud_ground The resulting subset of terrain points (primarily for diagnostic purposes).
      */
     virtual void removeGround(const PointCloudConstPtr& cloud_in, 
                               PointCloudPtr& cloud_obstacles, 
                               PointCloudPtr& cloud_ground) = 0;
 
 protected:
-    float voxel_size_ = 0.0f; ///< 0.0 means disabled.
+    float voxel_size_ = 0.0f; ///< Dimension of the voxel filter; 0.0 indicates a disabled state.
 };
 
 } // namespace fs_perception

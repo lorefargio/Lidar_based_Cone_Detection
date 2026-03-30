@@ -16,7 +16,13 @@ namespace fs_perception {
  * @brief Handles LiDAR point cloud deskewing using IMU data.
  * 
  * Corrects distortion caused by sensor motion during a single LiDAR sweep
- * by interpolating IMU-derived rotation and (optionally) translation.
+ * by interpolating IMU-derived rotation. It achieves high throughput via:
+ * 1. **Massively Parallel Correction**: Uses OpenMP to process points in parallel.
+ * 2. **Fast NLERP Interpolation**: Utilizes Normalized Linear Interpolation 
+ *    (NLERP) for orientations between keyframes, which is faster than SLERP 
+ *    and sufficiently accurate for the small time steps between LiDAR points.
+ * 3. **Linear Monotonic Search**: Uses a moving iterator search to find IMU 
+ *    data in the buffer in O(1) amortized time instead of O(log N).
  */
 class Deskewer {
 public:

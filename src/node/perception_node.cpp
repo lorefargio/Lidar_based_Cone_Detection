@@ -227,7 +227,7 @@ LidarPerceptionNode::LidarPerceptionNode() : Node("lidar_perception_node") {
     if (!log_dir.empty() && log_dir.back() != '/') log_dir += '/';
     std::filesystem::create_directories(log_dir); 
     
-    this->declare_parameter<int>("debug_pub_freq", 2); // Publish debug clouds every X frames
+    this->declare_parameter<int>("debug_pub_freq", 10); // Publish debug clouds every 10 frames
     
     // Combine clustering and ground removal algorithm names for profiling
     std::string profile_name = cl_algo + "_" + gr_type;
@@ -252,11 +252,11 @@ LidarPerceptionNode::LidarPerceptionNode() : Node("lidar_perception_node") {
             });
     }
 
-    pub_markers_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("/perception/cones_vis", 10);
-    pub_cones_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/perception/cones", 10);
-    pub_cone_points_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/perception/cone_points", 10);
-    pub_ground_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/perception/ground_debug", 10);
-    pub_no_ground_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/perception/no_ground", 10);
+    pub_markers_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("/perception/cones_vis", rclcpp::SensorDataQoS());
+    pub_cones_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/perception/cones", rclcpp::SensorDataQoS());
+    pub_cone_points_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/perception/cone_points", rclcpp::SensorDataQoS());
+    pub_ground_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/perception/ground_debug", rclcpp::SensorDataQoS());
+    pub_no_ground_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/perception/no_ground", rclcpp::SensorDataQoS());
 }
 
 LidarPerceptionNode::~LidarPerceptionNode() {
@@ -276,34 +276,39 @@ void LidarPerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPt
     frame_counter_++;
     if (profiler_) profiler_->startFrame();
 
-    // Phase 1: Point cloud conversion from ROS to PCL
+    /**
+     * @phase Data Conversion
+     * Transformation of the incoming ROS 2 message into a PCL-compatible format.
+     */
     if (profiler_) profiler_->startTimer("conversion");
     try {
         pcl::fromROSMsg(*msg, *raw_cloud_ptr_);
     } catch (const std::exception& e) {
-        RCLCPP_ERROR(this->get_logger(), "Conversion from ROS to PCL failed: %s", e.what());
+        RCLCPP_ERROR(this->get_logger(), "ROS-to-PCL conversion failure: %s", e.what());
         if (profiler_) profiler_->stopTimer("conversion");
         return;
     }
     if (profiler_) profiler_->stopTimer("conversion");
     
     if (raw_cloud_ptr_->empty()) {
-        RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 5000, "Received empty cloud.");
+        RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 5000, "Received null or empty point cloud.");
         return;
     }
 
-    // Phase 1.05: Pre-processing (Truncation FIRST, then Voxel Filter)
+    /**
+     * @phase Pre-processing
+     * Sequential execution of spatial truncation and early voxelization.
+     * Truncation is performed first to bound the coordinate space, preventing 
+     * potential overflow in the subsequent voxel grid filter.
+     */
     if (profiler_) profiler_->startTimer("conversion"); 
 
-    // 1. Truncate points beyond max_range and handle NaNs
-    // This prevents VoxelGrid overflow by removing outliers at infinity
     preProcess(raw_cloud_ptr_);
 
-    // 2. Early downsampling on a clean, bounded cloud
     if (raw_cloud_ptr_->size() > 500) {
         pcl::VoxelGrid<PointT> early_vg;
         early_vg.setInputCloud(raw_cloud_ptr_);
-        early_vg.setLeafSize(0.05f, 0.05f, 0.05f); // 5cm voxel
+        early_vg.setLeafSize(0.05f, 0.05f, 0.05f); // 5cm isotropic voxel
         PointCloudPtr filtered(new PointCloud);
         early_vg.filter(*filtered);
         *raw_cloud_ptr_ = *filtered;
@@ -313,17 +318,23 @@ void LidarPerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPt
 
     if (raw_cloud_ptr_->empty()) return;
 
-    // Phase 1.1: Lidar Deskewing
+    /**
+     * @phase Motion Compensation
+     * Deskewing of the point cloud based on high-frequency IMU telemetry.
+     */
     if (this->get_parameter("use_deskewing").as_bool() && deskewer_) {
         if (profiler_) profiler_->startTimer("deskewing");
         if (!deskewer_->deskew(raw_cloud_ptr_)) {
             RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000, 
-                "Deskewing failed (possibly waiting for IMU data).");
+                "Deskewing operation postponed (awaiting IMU synchronization).");
         }
         if (profiler_) profiler_->stopTimer("deskewing");
     }
 
-    // Phase 2: Ground Removal
+    /**
+     * @phase Ground Removal
+     * Segmentation of the point cloud into traversable terrain and obstacle subsets.
+     */
     if (!ground_remover_) return;
 
     if (profiler_) profiler_->startTimer("ground_removal");
@@ -335,7 +346,6 @@ void LidarPerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPt
 
     if (profiler_) profiler_->stopTimer("ground_removal");
     
-    // Publish debug ground clouds only at the specified frequency to save bandwidth
     if (frame_counter_ % this->get_parameter("debug_pub_freq").as_int() == 0) {
         sensor_msgs::msg::PointCloud2 no_ground_msg;
         pcl::toROSMsg(*obstacles_str_, no_ground_msg);
@@ -343,9 +353,12 @@ void LidarPerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPt
         pub_no_ground_->publish(std::move(no_ground_msg));
     }
     
-    // Phase 3: Object Clustering
+    /**
+     * @phase Object Clustering
+     * Identification of discrete point clusters using the configured spatial partitioning strategy.
+     */
     if (!clusterer_) {
-        RCLCPP_ERROR_ONCE(this->get_logger(), "Clusterer not initialized!");
+        RCLCPP_ERROR_ONCE(this->get_logger(), "Clustering interface not initialized.");
         return;
     }
 
@@ -354,11 +367,13 @@ void LidarPerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPt
     clusterer_->cluster(obstacles_str_, clusters);
     if (profiler_) profiler_->stopTimer("clustering");
 
-    // Phase 3.1: Proximity-based Cluster Merging to handle over-segmented objects
+    /**
+     * @phase Cluster Merging
+     * Proximity-based consolidation of over-segmented clusters using centroidal distance.
+     */
     if (profiler_) profiler_->startTimer("merging");
     std::vector<PointCloudPtr> merged_clusters;
     
-    // Pre-filter noise clusters to reduce K in the O(K^2) loop
     std::vector<PointCloudPtr> valid_candidates;
     for (auto& c : clusters) {
         if (c->size() >= 3) {
@@ -368,14 +383,13 @@ void LidarPerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPt
 
     std::vector<bool> merged_flag(valid_candidates.size(), false);
     
-    // Centroids with aligned_allocator for Eigen SSE compatibility
     std::vector<Eigen::Vector4f, Eigen::aligned_allocator<Eigen::Vector4f>> centroids(valid_candidates.size());
     
     for(size_t i = 0; i < valid_candidates.size(); ++i) {
         pcl::compute3DCentroid(*valid_candidates[i], centroids[i]);
     }
 
-    const float MERGE_DIST_SQ = 0.25f * 0.25f; // 25cm distance for merging clusters
+    const float MERGE_DIST_SQ = 0.25f * 0.25f; 
     for (size_t i = 0; i < valid_candidates.size(); ++i) {
         if (merged_flag[i]) continue;
         PointCloudPtr super_cluster(new PointCloud(*valid_candidates[i]));
@@ -394,9 +408,12 @@ void LidarPerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPt
     }
     if (profiler_) profiler_->stopTimer("merging");
 
-    // Phase 4: Candidate Estimation and Duplicate Filtering
+    /**
+     * @phase Feature Extraction and Estimation
+     * Statistical classification of clusters using PCA-derived features and geometric constraints.
+     */
     if (!estimator_) {
-        RCLCPP_ERROR_ONCE(this->get_logger(), "Estimator not initialized!");
+        RCLCPP_ERROR_ONCE(this->get_logger(), "Estimation engine not initialized.");
         return;
     }
 
@@ -416,9 +433,12 @@ void LidarPerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPt
     }
     if (profiler_) profiler_->stopTimer("estimation");
     
-    // Duplicate suppression using spatial proximity
+    /**
+     * @phase Duplicate Suppression
+     * Non-maximum suppression based on spatial proximity to eliminate redundant detections.
+     */
     if (profiler_) profiler_->startTimer("duplicate");
-    const float MIN_DIST_SQ = 0.4f * 0.4f; // 40cm duplicate radius
+    const float MIN_DIST_SQ = 0.4f * 0.4f; 
     std::vector<Cone> final_cones;
 
     for (const auto& candidate : candidate_cones) {
@@ -437,12 +457,15 @@ void LidarPerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPt
     }
     if (profiler_) profiler_->stopTimer("duplicate");
 
-    // Phase 5: Visualization Markers and Detection Output
+    /**
+     * @phase Output Generation
+     * Construction and publication of visualization markers and detection messages.
+     * Uses std::move to efficiently transfer ownership of large message structures.
+     */
     visualization_msgs::msg::MarkerArray markers;
     PointCloud cones_cloud_out; 
     PointCloud cone_points_out;
 
-    // Clear previous frame markers
     visualization_msgs::msg::Marker delete_marker;
     delete_marker.action = visualization_msgs::msg::Marker::DELETEALL;
     delete_marker.header = msg->header;
@@ -450,7 +473,6 @@ void LidarPerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPt
     delete_marker.id = 0;
     markers.markers.push_back(delete_marker);
 
-    // Clear distance labels as well
     visualization_msgs::msg::Marker delete_labels;
     delete_labels.action = visualization_msgs::msg::Marker::DELETEALL;
     delete_labels.header = msg->header;
@@ -460,22 +482,20 @@ void LidarPerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPt
 
     int id_counter = 1;
     for (const auto& cone : final_cones) {
-        // 1. Geometry Marker (Cylinder)
         visualization_msgs::msg::Marker m;
-        m.header = msg->header;
+        m.header = msg->header; 
         m.ns = "cones";
         m.id = id_counter;
         m.type = visualization_msgs::msg::Marker::CYLINDER;
         m.action = visualization_msgs::msg::Marker::ADD;
-        m.lifetime = rclcpp::Duration::from_seconds(0.2); 
+        m.lifetime = rclcpp::Duration::from_seconds(0.1); 
 
         m.pose.position.x = cone.x;
         m.pose.position.y = cone.y;
         m.pose.position.z = cone.z + (cone.height / 2.0); 
-        m.scale.x = 0.2; m.scale.y = 0.2; m.scale.z = cone.height;
-        m.color.a = 1.0;
+        m.scale.x = 0.22; m.scale.y = 0.22; m.scale.z = cone.height;
+        m.color.a = 0.8;
         
-        // Color mapping for visualization
         if (cone.color == ConeColor::BLUE) { 
             m.color.b = 1.0f; m.color.r = 0.0f; m.color.g = 0.0f; 
         } else if (cone.color == ConeColor::YELLOW) { 
@@ -483,21 +503,19 @@ void LidarPerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPt
         } else { 
             m.color.b = 1.0f; m.color.r = 0.0f; m.color.g = 0.0f; 
         }
-
         markers.markers.push_back(m);
 
-        // 2. Distance Label Marker (Text)
         visualization_msgs::msg::Marker t;
         t.header = msg->header;
         t.ns = "distance_labels";
         t.id = id_counter++;
         t.type = visualization_msgs::msg::Marker::TEXT_VIEW_FACING;
         t.action = visualization_msgs::msg::Marker::ADD;
-        t.lifetime = rclcpp::Duration::from_seconds(0.2);
+        t.lifetime = rclcpp::Duration::from_seconds(0.1);
         t.pose.position.x = cone.x;
         t.pose.position.y = cone.y;
-        t.pose.position.z = cone.z + cone.height + 0.2;
-        t.scale.z = 0.15; // text height
+        t.pose.position.z = cone.z + cone.height + 0.25;
+        t.scale.z = 0.15; 
         t.color.a = 1.0; t.color.r = 1.0; t.color.g = 1.0; t.color.b = 1.0;
         
         std::stringstream ss;
@@ -505,41 +523,38 @@ void LidarPerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPt
         t.text = ss.str();
         markers.markers.push_back(t);
 
-        // 3. Centroid Output (For Range/Bearing information)
         PointT p_out;
         p_out.x = cone.x; p_out.y = cone.y; p_out.z = cone.z;
-        p_out.intensity = cone.range; // Using intensity as a way to pass range in default cloud
+        p_out.intensity = cone.range; 
         cones_cloud_out.push_back(p_out);
 
-        // 4. Full Points Output (For Bounding Box check)
         if (cone.cloud) {
             cone_points_out += *cone.cloud;
         }
     }
 
-    pub_markers_->publish(markers);
+    pub_markers_->publish(std::move(markers));
 
     sensor_msgs::msg::PointCloud2 cones_msg;
     pcl::toROSMsg(cones_cloud_out, cones_msg);
-    cones_msg.header = msg->header;
-    pub_cones_->publish(cones_msg);
+    cones_msg.header = msg->header; 
+    pub_cones_->publish(std::move(cones_msg));
 
     sensor_msgs::msg::PointCloud2 cone_points_msg;
     pcl::toROSMsg(cone_points_out, cone_points_msg);
-    cone_points_msg.header = msg->header;
-    pub_cone_points_->publish(cone_points_msg);
+    cone_points_msg.header = msg->header; 
+    pub_cone_points_->publish(std::move(cone_points_msg));
 
-    // Phase 6: Finalize frame profiling
     if (profiler_) {
         profiler_->endFrame(final_cones.size());
 
         if (frame_counter_ % 50 == 0) {
             auto total_ms = profiler_->getLastFrameTotalMs();
-            RCLCPP_INFO(this->get_logger(), "Frame: %d | Total Latency: %.2f ms | Cones: %zu", 
+            RCLCPP_INFO(this->get_logger(), "Frame: %d | Latency: %.2f ms | Cones Detected: %zu", 
                 frame_counter_, total_ms, final_cones.size());
             
             if (total_ms > 50.0) {
-                RCLCPP_WARN(this->get_logger(), "PERFORMANCE ALERT: Latency (%.2f ms) exceeds 20Hz budget!", total_ms);
+                RCLCPP_WARN(this->get_logger(), "Performance Violation: Frame latency (%.2f ms) exceeds 20Hz real-time budget.", total_ms);
             }
         }
     }
@@ -548,12 +563,16 @@ void LidarPerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPt
 void LidarPerceptionNode::preProcess(PointCloudPtr cloud) {
     if (cloud->empty()) return;
 
+    /**
+     * @details Implements a rapid spatial filter to prune points outside the 
+     * operational region of interest. Distances are evaluated as squared values 
+     * to circumvent costly square-root operations.
+     */
     const float max_range = static_cast<float>(this->get_parameter("max_range").as_double());
     const float max_r2 = max_range * max_range;
-    const float min_r2 = 0.25f * 0.25f; // 50cm blind spot radius
+    const float min_r2 = 0.25f * 0.25f; // Internal occlusion / sensor blind spot
 
     auto it = std::remove_if(cloud->points.begin(), cloud->points.end(), [&](const PointT& pt) {
-        // Fast distance squared check (avoids sqrt)
         float r2 = pt.x * pt.x + pt.y * pt.y;
         return r2 > max_r2 || r2 < min_r2 || !std::isfinite(pt.x) || !std::isfinite(pt.y) || !std::isfinite(pt.z);
     });
@@ -569,7 +588,9 @@ void LidarPerceptionNode::preProcess(PointCloudPtr cloud) {
 } // namespace fs_perception
 
 /**
- * @brief Entry point for the lidar perception node.
+ * @brief Main execution entry point.
+ * 
+ * Initializes the ROS 2 middleware and instantiates the perception controller.
  */
 int main(int argc, char **argv) {
     rclcpp::init(argc, argv);

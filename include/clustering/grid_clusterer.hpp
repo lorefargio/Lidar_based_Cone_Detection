@@ -8,19 +8,24 @@ namespace fs_perception {
 
 /**
  * @class GridClusterer
- * @brief Fast 2D Grid-based Connected Components clustering. 
+ * @brief High-performance 2D Grid-based Connected Components clustering. 
  * 
- * Projects points onto a sparse 2D grid and finds connected components (8-connectivity) 
- * among occupied cells. This algorithm is extremely fast (O(N)).
+ * This algorithm projects 3D points onto a sparse 2D grid and identifies object candidates 
+ * using an 8-connectivity BFS search. By utilizing a pre-allocated flat grid, it achieves 
+ * a strictly $O(N)$ time complexity, making it the most computationally efficient grouping 
+ * strategy in the pipeline.
+ * 
+ * @note While extremely fast, this method ignores vertical separation and is primarily 
+ * intended for flat-track scenarios where obstacle overlap along the Z-axis is negligible.
  */
 class GridClusterer : public ClustererInterface {
 public:
     /**
-     * @brief Constructor for GridClusterer.
-     * @param grid_resolution Size of each grid cell (meters).
-     * @param max_range Max distance to process (meters).
-     * @param min_cluster_size Minimum points for a valid cluster.
-     * @param max_cluster_size Maximum points for a valid cluster.
+     * @brief Constructs a GridClusterer with specified spatial resolution.
+     * @param grid_resolution The side length of each square grid cell (meters).
+     * @param max_range Radial distance cutoff for point processing.
+     * @param min_cluster_size Minimum point count threshold for valid clusters.
+     * @param max_cluster_size Maximum point count threshold to filter out environmental noise.
      */
     GridClusterer(float grid_resolution = 0.15f, float max_range = 25.0f, int min_cluster_size = 3, int max_cluster_size = 300);
 

@@ -15,11 +15,11 @@ void GridClusterer::cluster(const PointCloudPtr& cloud, std::vector<PointCloudPt
         return;
     }
 
-    // Keep track of which cells are occupied this frame to avoid full grid scanning
+    // Identify occupied cells to restrict subsequent traversal and cleanup to O(N_occupied).
     std::vector<int> occupied_indices;
     occupied_indices.reserve(cloud->size());
 
-    // Phase 1: Voxelization / Grid Population
+    // Phase 1: Spatial Discretization (O(N))
     for (size_t i = 0; i < cloud->points.size(); ++i) {
         const auto& pt = cloud->points[i];
         
@@ -33,18 +33,18 @@ void GridClusterer::cluster(const PointCloudPtr& cloud, std::vector<PointCloudPt
 
         if (grid_[idx].point_indices.empty()) {
             occupied_indices.push_back(idx);
-            grid_[idx].id = -1; // Reset for this frame
+            grid_[idx].id = -1; // Reset classification state for this frame.
         }
         grid_[idx].point_indices.push_back(i);
     }
 
     int current_cluster_id = 1;
 
-    // BFS neighbor offsets (8-connectivity in 2D)
+    // Neighbor search kernel (8-connectivity in 2D Euclidean space).
     const int dx[] = {-1, -1, -1,  0, 0,  1, 1, 1};
     const int dy[] = {-1,  0,  1, -1, 1, -1, 0, 1};
 
-    // Phase 2: Connected Components Analysis using BFS
+    // Phase 2: Connected Components Analysis via Breadth-First Search (BFS)
     for (int start_idx : occupied_indices) {
         Cell& start_cell = grid_[start_idx];
         if (start_cell.id != -1) continue;
@@ -63,7 +63,7 @@ void GridClusterer::cluster(const PointCloudPtr& cloud, std::vector<PointCloudPt
                 current_cluster->push_back(cloud->points[p_idx]);
             }
 
-            // Reconstruct coordinates from flat index
+            // Restore spatial coordinates from the flat grid index.
             int gx = curr_idx / grid_dim_ - grid_dim_ / 2;
             int gy = curr_idx % grid_dim_ - grid_dim_ / 2;
 
@@ -82,6 +82,7 @@ void GridClusterer::cluster(const PointCloudPtr& cloud, std::vector<PointCloudPt
             }
         }
 
+        // Apply cardinality filter to candidate clusters.
         if (current_cluster->size() >= (size_t)min_size_ && current_cluster->size() <= (size_t)max_size_) {
             clusters.push_back(current_cluster);
         }
@@ -89,7 +90,8 @@ void GridClusterer::cluster(const PointCloudPtr& cloud, std::vector<PointCloudPt
         current_cluster_id++;
     }
 
-    // Phase 3: Cleanup only occupied cells for next frame
+    // Phase 3: Selective Reset
+    // Only resets cells that were modified, preserving O(N_occupied) performance.
     for (int idx : occupied_indices) {
         grid_[idx].point_indices.clear();
         grid_[idx].id = -1;

@@ -1,41 +1,25 @@
-# Camera-LiDAR Fusion Integration
+# Multimodal Sensor Fusion Integration (Camera-LiDAR)
 
-Questo documento descrive le feature della pipeline di percezione per supportare la fusione sensoriale (Camera-LiDAR), migliorando la visualizzazione e l'output dei dati.
+## Abstract
+This document delineates the architectural interfaces designed to facilitate synchronous fusion between LiDAR-derived 3D spatial data and Camera-derived 2D semantic labels. The objective is to enhance cone classification reliability by cross-validating geometric primitives with chromatic information.
 
-## 1. Obiettivi della Modifica
-L'integrazione mira a fornire al modulo di fusione tutte le informazioni necessarie per validare i rilevamenti:
-*   **Visualizzazione Distanza:** Visualizzazione in tempo reale della distanza del sensore da ogni cono.
-*   **Range & Bearing:** Calcolo esplicito della distanza radiale ($r$) e dell'angolo ($	theta$) del centroide del cluster.
-*   **Full Point Cloud:** Output di tutti i punti appartenenti a ciascun cluster identificato come cono, utile per il controllo di inclusione nelle bounding box 2D/3D della camera.
+## Data Interface Specification
 
----
+### 1. Perceptual Primitives
+The `Cone` structure is designed as a shared primitive, encapsulating both Cartesian coordinates ($x, y, z$) and polar descriptors (Range $\rho$, Bearing $\theta$). This dual representation simplifies the projection into the image plane ($u, v$):
+$$\begin{bmatrix} u \\ v \\ 1 \end{bmatrix} = \mathbf{K} \cdot \mathbf{T}_{CL} \cdot \begin{bmatrix} x \\ y \\ z \\ 1 \end{bmatrix}$$
+where $\mathbf{K}$ is the intrinsic camera matrix and $\mathbf{T}_{CL}$ is the extrinsic LiDAR-to-Camera transformation.
 
-## 2. Dettagli Implementativi
+### 2. Chromatic Attribution
+The `ConeColor` enumeration provides a semantic link to Camera-based object detection. During fusion, the system assigns a color label ($\text{Blue, Yellow, Orange}$) based on the highest intersection-over-union (IoU) between the projected LiDAR cluster bounding box and the 2D neural network detection.
 
-### 2.1 Struttura Dati (`types.hpp`)
-La struttura `Cone` è stata estesa per includere i metadati di fusione:
-```cpp
-struct Cone {
-    float x, y, z;        // Posizione cartesiana
-    float range;          // Distanza radiale (m)
-    float bearing;        // Angolo (rad)
-    // ...
-    PointCloudPtr cloud;  // Puntatore ai punti originali del cluster
-};
-```
+## Output Streams for Fusion
 
-### 2.2 Output del Sistema
-Il nodo pubblica ora due flussi di dati principali per la fusione:
-1.  **`/perception/cones`**: Pubblica i centroidi dei coni. L'intensità del punto viene usata per trasportare il valore del `range` per una rapida consultazione.
-2.  **`/perception/cone_points`**: Pubblica l'unione di tutti i punti dei cluster validati. Questo permette di proiettare i punti LiDAR sull'immagine della camera e verificare se cadono all'interno della bounding box rilevata dalla rete neurale.
+### /perception/cones (Centroid Data)
+Publishes the localized centroids. The `intensity` field is repurposed to carry the radial range $\rho$, providing a direct high-bandwidth channel for SLAM algorithms without requiring additional message deserialization.
 
----
+### /perception/cone_points (Cluster Volumes)
+Publishes the union of all points $\mathcal{P} \in \mathcal{C}_k$ for validated cones. This stream is critical for **Contour-based Fusion**, allowing for precise alignment checks against the semantic segments in the image.
 
-## 3. Visualizzazione con Foxglove
-È stata aggiunta una nuova namespace di marker: `distance_labels`.
-*   **Tipo:** `TEXT_VIEW_FACING`
-*   **Contenuto:** Distanza in metri con precisione al centimetro (es. "12.45m").
-*   **Posizionamento:** Automaticamente sopra il cilindro di visualizzazione del cono.
-
----
-
+## Visualization Interface
+Visual validation is performed via **Textual Metadata Markers** in the `distance_labels` namespace. These markers display real-time radial distance with centimeter precision, enabling rapid experimental debugging of the depth-estimation accuracy.

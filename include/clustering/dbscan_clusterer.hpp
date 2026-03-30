@@ -8,19 +8,23 @@ namespace fs_perception {
 
 /**
  * @class DBSCANClusterer
- * @brief Density-Based Spatial Clustering of Applications with Noise (DBSCAN).
+ * @brief Implementation of the Density-Based Spatial Clustering of Applications with Noise (DBSCAN) algorithm.
  * 
- * Groups points together that are packed closely together (points with many nearby neighbors), 
- * marking as outliers points that lie alone in low-density regions (noise).
+ * This implementation optimizes the traditional DBSCAN approach by replacing the $O(N \log N)$ KD-Tree 
+ * radius search with a "Hash-Killer" Pre-allocated 3D Flat Grid. The world is discretized into a 
+ * 1D array representing a 3D volume, reducing neighbor lookup to $O(1)$ amortized complexity.
+ * 
+ * @note This optimization ensures deterministic execution times and is cache-friendly, making it 
+ * suitable for high-frequency real-time perception in racing environments.
  */
 class DBSCANClusterer : public ClustererInterface {
 public:
     /**
-     * @brief Constructor for DBSCANClusterer.
-     * @param eps The maximum distance between two samples for one to be considered as in the neighborhood of the other.
-     * @param min_pts The number of samples in a neighborhood for a point to be considered as a core point.
-     * @param min_cluster_size Minimum points required to consider a cluster valid.
-     * @param max_cluster_size Maximum points allowed in a cluster.
+     * @brief Constructs a DBSCANClusterer with specified hyperparameters.
+     * @param eps The maximum distance $\epsilon$ between two samples for neighborhood inclusion.
+     * @param min_pts The minimum number of samples required in a neighborhood to define a core point.
+     * @param min_cluster_size Minimum cardinality filter for valid clusters.
+     * @param max_cluster_size Maximum cardinality filter to exclude oversized or merged clusters.
      */
     DBSCANClusterer(float eps = 0.30f, int min_pts = 3, int min_cluster_size = 3, int max_cluster_size = 500);
 

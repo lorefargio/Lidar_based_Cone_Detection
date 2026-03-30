@@ -51,6 +51,13 @@ public:
 
     /**
      * @brief Estimates whether a cluster is a cone using static and dynamic geometric rules.
+     * 
+     * The estimation process is split into two phases:
+     * 1. **Phase 0: Bounding Box Early Exit**: A fast O(N) check of the axis-aligned 
+     *    bounding box (AABB) to reject obviously non-cone objects before expensive 
+     *    feature extraction.
+     * 2. **Phase 1 & 2**: Full feature extraction and dynamic rule application.
+     * 
      * @param cluster Point cloud of a single candidate object.
      * @return Cone structure with pose and binary confidence (1.0 if accepted, 0.0 if rejected).
      */
@@ -58,6 +65,11 @@ public:
 
     /**
      * @brief Extracts geometric and statistical features from a cluster.
+     * 
+     * Utilizes a **direct Eigen-based Covariance Matrix** calculation instead of 
+     * iterative PCA for performance. The eigenvalues are used to derive 
+     * linearity, planarity, and scattering (sphericity).
+     * 
      * @param cluster Point cloud of a single candidate object.
      * @return ClusterFeatures structure containing all calculated metrics.
      */
