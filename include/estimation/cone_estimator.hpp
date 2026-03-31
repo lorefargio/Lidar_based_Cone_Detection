@@ -29,7 +29,7 @@ public:
         float max_width = 0.36f;            ///< Maximum allowed width (meters).
         float min_aspect_ratio = 0.4f;      ///< Minimum width-to-height ratio.
         float max_aspect_ratio = 2.0f;      ///< Maximum width-to-height ratio.
-        float max_width_diff_ratio = 2.5f;  ///< Maximum allowed ratio between the largest and smallest horizontal widths.
+        float max_width_diff_ratio = 3.5f;  ///< Maximum allowed ratio between the largest and smallest horizontal widths.
         float min_intensity = 5.0f;         ///< Minimum average intensity threshold.
 
         // Principal Component Analysis (PCA) thresholds for shape classification

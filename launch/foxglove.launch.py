@@ -14,7 +14,7 @@ def generate_launch_description():
     # --- 2. COMMON PARAMETERS ---
     sensor_z_arg = DeclareLaunchArgument('sensor_z', default_value='-0.50', description='Lidar height from ground')
     max_range_arg = DeclareLaunchArgument('max_range', default_value='25.0', description='Max processing range')
-    min_cluster_arg = DeclareLaunchArgument('min_cluster_size', default_value='3', description='Min points per cluster')
+    min_cluster_arg = DeclareLaunchArgument('min_cluster_size', default_value='2', description='Min points per cluster')
     max_cluster_arg = DeclareLaunchArgument('max_cluster_size', default_value='300', description='Max points per cluster')
 
     # --- 3. GROUND REMOVAL PARAMETERS ---
@@ -48,7 +48,7 @@ def generate_launch_description():
     use_deskew_arg = DeclareLaunchArgument('use_deskewing', default_value='true')
     imu_topic_arg = DeclareLaunchArgument('imu_topic', default_value='/zed/zed_node/imu/data')
     use_vox_filt_arg = DeclareLaunchArgument('use_voxel_filter', default_value='false')
-    vox_size_arg = DeclareLaunchArgument('voxel_size', default_value='0.05')
+    vox_size_arg = DeclareLaunchArgument('voxel_size', default_value='0.035')
     static_imu_to_lidar_xyz_arg = DeclareLaunchArgument('static_imu_to_lidar_xyz',default_value='[0.0,0.053,0.0335]')
 
     # Our perception node

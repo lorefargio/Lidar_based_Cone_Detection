@@ -167,7 +167,7 @@ LidarPerceptionNode::LidarPerceptionNode() : Node("lidar_perception_node") {
         clusterer_ = std::make_unique<StringClusterer>(cfg);
         RCLCPP_INFO(this->get_logger(), "Clustering: STRING");
     } else {
-        this->declare_parameter<double>("grid_resolution", 0.20);
+        this->declare_parameter<double>("grid_resolution", 0.12);
         float res = static_cast<float>(this->get_parameter("grid_resolution").as_double());
         clusterer_ = std::make_unique<GridClusterer>(res, max_range, min_cluster, max_cluster);
         RCLCPP_INFO(this->get_logger(), "Clustering: GRID");
@@ -308,7 +308,7 @@ void LidarPerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPt
     if (raw_cloud_ptr_->size() > 500) {
         pcl::VoxelGrid<PointT> early_vg;
         early_vg.setInputCloud(raw_cloud_ptr_);
-        early_vg.setLeafSize(0.05f, 0.05f, 0.05f); // 5cm isotropic voxel
+        early_vg.setLeafSize(0.035f, 0.035f, 0.035f); // 3.5cm isotropic voxel
         PointCloudPtr filtered(new PointCloud);
         early_vg.filter(*filtered);
         *raw_cloud_ptr_ = *filtered;
