@@ -207,7 +207,7 @@ LidarPerceptionNode::LidarPerceptionNode() : Node("lidar_perception_node") {
     this->declare_parameter<bool>("use_deskewing", true);
     this->declare_parameter<std::string>("imu_topic", "/zed/zed_node/imu/data");
     this->declare_parameter<bool>("deskew_use_translation", true);
-    this->declare_parameter<std::vector<double>>("static_imu_to_lidar_xyz", {0.0, 0.0, 0.0});
+    this->declare_parameter<std::vector<double>>("static_imu_to_lidar_xyz", {-0.037, 0.0335, 0.053});
 
     if (this->get_parameter("use_deskewing").as_bool()) {
         Deskewer::Config d_cfg;
