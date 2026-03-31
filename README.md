@@ -1,30 +1,28 @@
 # High-Performance LiDAR Perception for Autonomous Racing
 
 ## Abstract
-This repository implements a modular, high-performance perception system designed for track-boundary localization (traffic cones) in Formula Student Driverless environments. The system is engineered for **Humble ROS 2** and optimized for a 20Hz update rate. The core architecture prioritizes deterministic execution, O(1) spatial indexing, and SIMD-accelerated transformations to facilitate robust control in high-speed maneuvers.
+This repository implements a modular, high-performance perception system designed for track-boundary localization (traffic cones) in Formula Student Driverless environments. The system is engineered for **Humble ROS 2** and optimized for a 20Hz update rate.
 
 ## System Architecture
-The pipeline is structured as a sequential execution model with the following stages:
+The pipeline is optimized for **Stability** and **Fluidity** through a three-stage refinement model:
 
-1.  **Preprocessing & Motion Compensation**: Implements non-linear temporal interpolation (Nlerp) for LiDAR deskewing and mandatory early voxelization to ensure cardinality bounds for downstream stages.
-2.  **Adaptive Ground Segmentation**: Employs **Patchwork++** (Lee et al., 2022) and Radial Slope Analysis to isolate non-ground obstacles while preserving base-points at high radial ranges.
-3.  **Spatial Grouping (Clustering)**: Utilizes Optimized DBSCAN and Connected Components, accelerated via **Flat 3D Grid Indexing** to eliminate KD-Tree reconstruction and hashing overhead.
-4.  **Geometric Estimation & Classification**: Performs covariance-based shape analysis (PCA) and rule-based validation with dynamic distance-aware thresholds.
+1.  **Geometric Pre-processing**: Uses a **3.5cm early voxel grid** to maintain high shape fidelity for small objects like cones.
+2.  **Modular Segmentation**: Employs adaptive ground removal and high-resolution **(12cm grid)** clustering.
+3.  **Hysteresis Estimation**: Performs rule-based classification with **Soft-Pass logic** and **Weighted Spatial Aggregation** for jitter-free output.
 
 ## Technical Documentation
-For detailed theoretical derivation and implementation justifications, refer to the following documents:
+For detailed theoretical derivation and implementation justifications, refer to:
 
-*   **[LiDAR Deskewing](docs/deskewing.md)**: Motion compensation and temporal synchronization.
-*   **[Ground Segmentation](docs/filtering.md)**: Patchwork++ (CZM, RNR, R-VPF, A-GLE) and Slope Analysis.
-*   **[Spatial Clustering](docs/clustering.md)**: O(1) Hash-Grid DBSCAN and Adaptive Density models.
-*   **[Geometric Estimation](docs/estimation.md)**: Covariance analysis and voxel-aware classification.
-*   **[System Configuration](docs/parameters.md)**: Comprehensive guide to runtime parameters and YAML tuning.
-*   **[Performance Benchmarking](docs/benchmarking.md)**: Methodology for P99 and PDF latency analysis.
+*   **[Pipeline Architecture](docs/architecture.md)**: High-level workflow and Mermaid diagrams.
+*   **[Ground Segmentation](docs/filtering.md)**: Patchwork++ and Slope Analysis.
+*   **[Spatial Clustering](docs/clustering.md)**: O(1) Grid, DBSCAN, and String algorithms explained.
+*   **[Geometric Estimation](docs/estimation.md)**: PCA, Soft-Pass logic, and Weighted Aggregation.
+*   **[System Configuration](docs/parameters.md)**: Comprehensive guide to runtime parameters.
 
 ## Core Optimization Principles
-*   **Memory Safety**: Persistent buffer reuse and zero-copy publishing (move semantics) to minimize heap fragmentation.
+*   **Temporal Stability**: Weighted centroid aggregation for smooth coordinate reporting.
 *   **Algorithmic Determinism**: Transition from $O(N \log N)$ to $O(N)$ via flat-grid spatial partitioning.
-*   **Real-Time QoS**: Utilization of `SensorDataQoS` and decimation-based debug publishing to ensure bandwidth availability for safety-critical topics.
+*   **Hysteresis Logic**: Multi-threshold validation to prevent detection flickering.
 
 ## Build and Execution
 ```bash
