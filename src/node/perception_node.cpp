@@ -434,26 +434,47 @@ void LidarPerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPt
     if (profiler_) profiler_->stopTimer("estimation");
     
     /**
-     * @phase Duplicate Suppression
-     * Non-maximum suppression based on spatial proximity to eliminate redundant detections.
+     * @phase Weighted Spatial Aggregation
+     * Non-maximum suppression with spatial averaging to eliminate redundant 
+     * detections and smooth the reported position.
      */
     if (profiler_) profiler_->startTimer("duplicate");
-    const float MIN_DIST_SQ = 0.4f * 0.4f; 
+    const float MIN_DIST_SQ = 0.45f * 0.45f; 
     std::vector<Cone> final_cones;
+    std::vector<bool> candidate_merged(candidate_cones.size(), false);
 
-    for (const auto& candidate : candidate_cones) {
-        bool is_duplicate = false;
-        for (const auto& accepted : final_cones) {
-            float dist_sq = (candidate.x - accepted.x)*(candidate.x - accepted.x) +
-                            (candidate.y - accepted.y)*(candidate.y - accepted.y);
+    for (size_t i = 0; i < candidate_cones.size(); ++i) {
+        if (candidate_merged[i]) continue;
+        
+        Cone aggregated = candidate_cones[i];
+        float sum_x = aggregated.x;
+        float sum_y = aggregated.y;
+        float sum_z = aggregated.z;
+        int count = 1;
+
+        for (size_t j = i + 1; j < candidate_cones.size(); ++j) {
+            if (candidate_merged[j]) continue;
+            
+            float dist_sq = (candidate_cones[i].x - candidate_cones[j].x)*(candidate_cones[i].x - candidate_cones[j].x) +
+                            (candidate_cones[i].y - candidate_cones[j].y)*(candidate_cones[i].y - candidate_cones[j].y);
+            
             if (dist_sq < MIN_DIST_SQ) {
-                is_duplicate = true;
-                break;
+                sum_x += candidate_cones[j].x;
+                sum_y += candidate_cones[j].y;
+                sum_z += candidate_cones[j].z;
+                count++;
+                candidate_merged[j] = true;
             }
         }
-        if (!is_duplicate) {
-            final_cones.push_back(candidate);
+        
+        if (count > 1) {
+            aggregated.x = sum_x / count;
+            aggregated.y = sum_y / count;
+            aggregated.z = sum_z / count;
+            aggregated.range = std::sqrt(aggregated.x*aggregated.x + aggregated.y*aggregated.y);
+            aggregated.bearing = std::atan2(aggregated.y, aggregated.x);
         }
+        final_cones.push_back(aggregated);
     }
     if (profiler_) profiler_->stopTimer("duplicate");
 

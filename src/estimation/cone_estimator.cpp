@@ -58,19 +58,24 @@ Cone ConeEstimator::estimate(const PointCloudPtr& cluster) {
     int expected_min_points = std::max(3, static_cast<int>(config_.min_points_at_10m * (100.0f / (r*r)))); 
     expected_min_points = std::min(20, expected_min_points); // CAP at 20 due to voxelization
     
-    if (features.point_count < expected_min_points) {
+    // Soft-Pass Logic: If the shape is exceptionally vertical and symmetric, 
+    // allow a 15% deficit in point count.
+    float point_pass_ratio = (float)features.point_count / (float)expected_min_points;
+    bool high_quality_shape = (features.verticality > 0.85f && features.symmetry < 1.5f);
+
+    if (point_pass_ratio < 0.85f && !high_quality_shape) {
         return cone;
     }
 
-    // PCA Features (Shape)
-    if (features.linearity > config_.max_linearity || 
-        features.planarity > config_.max_planarity || 
-        features.scattering < config_.min_scatter) {
+    // PCA Features (Shape) - Relaxed thresholds for better stability
+    if (features.linearity > (config_.max_linearity + 0.05f) || 
+        features.planarity > (config_.max_planarity + 0.05f) || 
+        features.scattering < (config_.min_scatter * 0.5f)) {
         return cone;
     }
 
     // Verticality Check
-    if (features.verticality < 0.5f) { 
+    if (features.verticality < 0.45f) { 
         return cone;
     }
 
