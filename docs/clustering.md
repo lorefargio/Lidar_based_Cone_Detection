@@ -10,9 +10,9 @@ The following table provides a high-level comparison of the available clustering
 | :--- | :--- | :--- | :--- | :--- |
 | **Grid BFS** | $O(N)$ | 2D | Flat track racing, minimal Z-overlap. | [Read more](./clustering_grid.md) |
 | **DBSCAN** | $\approx O(N)$ | 3D | General purpose, noise-tolerant. | [Read more](./clustering_dbscan.md) |
-| **Adaptive DBSCAN** | $O(N)$ | 3D | High-speed racing, long-range detection. | [Read more](./clustering_adaptive_dbscan.md) |
+| **HDBSCAN** | $O(N^2)$ | 3D | Best quality, lidar-aware stability. | [Read more](./clustering_hdbscan.md) |
 | **Euclidean (KD-Tree)** | $O(N \log N)$ | 3D | High precision, standard PCL wrapper. | [Read more](./clustering_euclidean.md) |
-| **String (Scan-line)** | $O(N)$ | 3D-ish | Ultra-low latency, driver-level sorting. | [Read more](./clustering_string.md) |
+| **Depth (Range-Img)** | $O(N)$ | 3D-Topo | Ultra-low latency, SOTA scale-invariance. | [Read more](./clustering_depth.md) |
 | **Voxel CC** | $O(N)$ | 3D | Sparse data, Z-separation needed. | [Read more](./clustering_voxel_cc.md) |
 
 ## Clustering Algorithm Summaries
@@ -46,23 +46,13 @@ graph TD
 - **Performance**: Eliminates KD-Tree rebuild overhead, ensuring P99 stability.
 - **Detailed Docs**: [DBSCAN Technical Deep-Dive](./clustering_dbscan.md)
 
-### 3. Adaptive DBSCAN
-Extends DBSCAN with a distance-scaling parameter model to compensate for LiDAR beam divergence at high range.
-- **Detailed Docs**: [Adaptive DBSCAN Technical Deep-Dive](./clustering_adaptive_dbscan.md)
+### 3. HDBSCAN (Hierarchical Clustering)
+A SOTA algorithm that extracts clusters based on their persistence across multiple density scales. It is exceptionally robust to noise and varying point densities at range.
+- **Detailed Docs**: [HDBSCAN Technical Deep-Dive](./clustering_hdbscan.md)
 
-### 4. String Clusterer (Linear Scan)
-Utilizes the sequential nature of LiDAR sweeps to group points in a single pass.
-
-```mermaid
-graph LR
-    A[Ring-Ordered Cloud] --> B[Scan Consecutive Points]
-    B --> C{Distance Gate < 0.3m}
-    C -- "Yes" --> D[Append to Current String]
-    C -- "No" --> E[Seal and Filter String]
-    E --> F[New Object Candidate]
-```
-- **Prerequisite**: Requires driver-level ring sorting.
-- **Detailed Docs**: [String Clusterer Technical Deep-Dive](./clustering_string.md)
+### 4. Depth-Clustering (Range-Image BFS)
+Evolves the linear scan approach into a 2D topological search. By projecting points into a range image, it captures complete 3D volumes without needing an external merging stage.
+- **Detailed Docs**: [Depth-Clustering Technical Deep-Dive](./clustering_depth.md)
 
 ## Summary of Optimization Changes
 - **Grid Resolution**: Lowered from **20cm to 12cm** to minimize spatial aliasing for standard cones (22.8cm width).

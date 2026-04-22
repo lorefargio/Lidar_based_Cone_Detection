@@ -6,7 +6,7 @@ RESULTS_DIR="${PERCEPTION_LOG_DIR:-log_profiler}"
 NODE_NAME="perception_node"
 
 # 1. Clustering Algorithms to test (Ground Remover: slope_based)
-CLUSTERING_ALGOS=("grid" "euclidean" "string" "dbscan" "hdbscan" "voxel")
+CLUSTERING_ALGOS=("grid" "euclidean" "depth" "dbscan" "hdbscan" "voxel")
 
 # 2. Ground Removal Algorithms to test (Clustering: grid)
 GROUND_ALGOS=("bin_based" "slope_based" "patchworkpp")

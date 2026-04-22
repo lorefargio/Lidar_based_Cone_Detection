@@ -31,6 +31,8 @@ public:
         float max_aspect_ratio = 2.0f;      ///< Maximum width-to-height ratio.
         float max_width_diff_ratio = 3.5f;  ///< Maximum allowed ratio between the largest and smallest horizontal widths.
         float min_intensity = 5.0f;         ///< Minimum average intensity threshold.
+        float yellow_intensity_threshold = 25.0f; ///< Intensity above which a cone is classified as YELLOW.
+        float color_classification_range = 5.0f;  ///< Maximum range to attempt color classification (meters).
 
         // Principal Component Analysis (PCA) thresholds for shape classification
         float max_linearity = 0.8f;         ///< Threshold to reject highly linear objects (e.g., posts, legs).

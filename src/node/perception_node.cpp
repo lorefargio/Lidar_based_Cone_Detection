@@ -11,11 +11,11 @@
 #include "filtering/bin_based_ground_remover.hpp"
 #include "filtering/slope_based_ground_remover.hpp"
 #include "filtering/patchworkpp_ground_remover.hpp"
-#include "clustering/string_clusterer.hpp"
+#include "clustering/depth_clusterer.hpp"
 #include "clustering/euclidean_clusterer.hpp"
 #include "clustering/grid_clusterer.hpp"
 #include "clustering/dbscan_clusterer.hpp"
-#include "clustering/adaptive_dbscan_clusterer.hpp"
+#include "clustering/hdbscan_clusterer.hpp"
 #include "clustering/voxel_connected_components.hpp"
 #include "estimation/cone_estimator.hpp"
 
@@ -143,29 +143,29 @@ LidarPerceptionNode::LidarPerceptionNode() : Node("lidar_perception_node") {
         clusterer_ = std::make_unique<DBSCANClusterer>(eps, min_pts, min_cluster, max_cluster);
         RCLCPP_INFO(this->get_logger(), "Clustering: DBSCAN");
     } else if (cl_algo == "hdbscan") {
-        this->declare_parameter<double>("hdbscan_eps_base", 0.15);
-        this->declare_parameter<double>("hdbscan_alpha", 0.015);
-        this->declare_parameter<int>("hdbscan_min_pts", 3);
-        float eps_base = static_cast<float>(this->get_parameter("hdbscan_eps_base").as_double());
-        float alpha = static_cast<float>(this->get_parameter("hdbscan_alpha").as_double());
-        int min_pts = this->get_parameter("hdbscan_min_pts").as_int();
-        clusterer_ = std::make_unique<AdaptiveDBSCANClusterer>(eps_base, alpha, min_pts, min_cluster, max_cluster);
-        RCLCPP_INFO(this->get_logger(), "Clustering: ADAPTIVE-DBSCAN");
+        HDBSCANClusterer::Config cfg;
+        this->declare_parameter<int>("hdbscan_min_pts", 5);
+        this->declare_parameter<double>("hdbscan_alpha", 0.02);
+        cfg.min_pts = this->get_parameter("hdbscan_min_pts").as_int();
+        cfg.alpha_scaling = static_cast<float>(this->get_parameter("hdbscan_alpha").as_double());
+        cfg.min_cluster_size = min_cluster;
+        clusterer_ = std::make_unique<HDBSCANClusterer>(cfg);
+        RCLCPP_INFO(this->get_logger(), "Clustering: TRUE HDBSCAN (Lidar-Aware)");
     } else if (cl_algo == "voxel") {
         this->declare_parameter<double>("voxel_grid_size", 0.15);
         float v_size = static_cast<float>(this->get_parameter("voxel_grid_size").as_double());
         clusterer_ = std::make_unique<VoxelConnectedComponents>(v_size, min_cluster, max_cluster);
         RCLCPP_INFO(this->get_logger(), "Clustering: VOXEL");
-    } else if (cl_algo == "string") {
-        StringClusterer::Config cfg;
-        this->declare_parameter<double>("string_max_dist", 0.3);
-        this->declare_parameter<double>("string_max_int_jump", 100.0);
-        cfg.max_dist = static_cast<float>(this->get_parameter("string_max_dist").as_double());
-        cfg.max_int_jump = static_cast<float>(this->get_parameter("string_max_int_jump").as_double());
+    } else if (cl_algo == "depth") {
+        DepthClusterer::Config cfg;
+        this->declare_parameter<double>("depth_theta_thr", 8.0);
+        this->declare_parameter<int>("depth_num_rings", 32);
+        cfg.theta_threshold_deg = static_cast<float>(this->get_parameter("depth_theta_thr").as_double());
+        cfg.num_rings = this->get_parameter("depth_num_rings").as_int();
         cfg.min_cluster_size = min_cluster;
         cfg.max_cluster_size = max_cluster;
-        clusterer_ = std::make_unique<StringClusterer>(cfg);
-        RCLCPP_INFO(this->get_logger(), "Clustering: STRING");
+        clusterer_ = std::make_unique<DepthClusterer>(cfg);
+        RCLCPP_INFO(this->get_logger(), "Clustering: DEPTH-IMAGE (BFS)");
     } else {
         this->declare_parameter<double>("grid_resolution", 0.12);
         float res = static_cast<float>(this->get_parameter("grid_resolution").as_double());
@@ -187,7 +187,7 @@ LidarPerceptionNode::LidarPerceptionNode() : Node("lidar_perception_node") {
     this->declare_parameter<double>("rule_dynamic_width_decay", 0.005);
     this->declare_parameter<int>("rule_min_points_at_10m", 5);
     this->declare_parameter<double>("rule_min_intensity", 5.0);
-    
+
     est_cfg.min_height = static_cast<float>(this->get_parameter("rule_min_height").as_double());
     est_cfg.max_height = static_cast<float>(this->get_parameter("rule_max_height").as_double());
     est_cfg.base_min_width = static_cast<float>(this->get_parameter("rule_base_min_width").as_double());
@@ -308,7 +308,7 @@ void LidarPerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPt
     if (raw_cloud_ptr_->size() > 500) {
         pcl::VoxelGrid<PointT> early_vg;
         early_vg.setInputCloud(raw_cloud_ptr_);
-        early_vg.setLeafSize(0.035f, 0.035f, 0.035f); // 3.5cm isotropic voxel
+        early_vg.setLeafSize(0.02f, 0.02f, 0.02f); // 2cm isotropic voxel for 40-channel LiDAR
         PointCloudPtr filtered(new PointCloud);
         early_vg.filter(*filtered);
         *raw_cloud_ptr_ = *filtered;
@@ -553,7 +553,6 @@ void LidarPerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPt
             cone_points_out += *cone.cloud;
         }
     }
-
     pub_markers_->publish(std::move(markers));
 
     sensor_msgs::msg::PointCloud2 cones_msg;

@@ -37,6 +37,7 @@ To prevent "flickering" of detections, a hysteresis-like mechanism is used:
 - This allows a high-quality cone to be retained even if one ring or firing is temporarily missed.
 
 ## Summary of Parameter Optimizations
-- **Expected Points Cap**: Lowered to **20** to align with the 3.5cm voxel discretization.
+- **Expected Points Cap**: Increased to **60** to align with the 2.0cm voxel discretization and 40-channel density.
 - **Max Width Ratio (Symmetry)**: Relaxed to **3.5** to accommodate quantization noise.
-- **Verticality Threshold**: Lowered to **0.45f** for robust detection under slight sensor tilt.
+- **Verticality Threshold**: Increased to **0.65f** to exploit the higher vertical resolution (0.33°) for better axis alignment.
+- **Intensity Filtering**: Introduced minimum intensity check to filter non-reflective environmental noise.

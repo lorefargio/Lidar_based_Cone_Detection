@@ -47,11 +47,11 @@ add_executable(perception_node
   src/filtering/bin_based_ground_remover.cpp
   src/filtering/slope_based_ground_remover.cpp
   src/filtering/patchworkpp_ground_remover.cpp
-  src/clustering/string_clusterer.cpp
+  src/clustering/hdbscan_clusterer.cpp
+  src/clustering/depth_clusterer.cpp
   src/clustering/euclidean_clusterer.cpp
   src/clustering/grid_clusterer.cpp
   src/clustering/dbscan_clusterer.cpp
-  src/clustering/adaptive_dbscan_clusterer.cpp
   src/clustering/voxel_connected_components.cpp
   src/estimation/cone_estimator.cpp
   src/utils/performance_profiler.cpp

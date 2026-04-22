@@ -7,7 +7,7 @@ This document defines the configuration space for the LiDAR perception pipeline.
 | :--- | :--- | :--- | :--- |
 | `sensor_z` | `-0.52` | m | Mounting height of the LiDAR. |
 | `max_range` | `25.0` | m | Max radial distance for processing. |
-| **`voxel_size`** | **`0.035`** | **m** | **Early voxel grid leaf size.** |
+| **`voxel_size`** | **`0.02`** | **m** | **Early voxel grid leaf size.** |
 | `min_cluster_size`| `2` | - | Min points per valid object. |
 | `max_cluster_size`| `300` | - | Max points per valid object. |
 
@@ -27,10 +27,13 @@ This document defines the configuration space for the LiDAR perception pipeline.
 | :--- | :--- | :--- | :--- |
 | `rule_min_height` | `0.10` | m | Min cone height. |
 | `rule_max_height` | `0.50` | m | Max cone height. |
-| **`rule_min_points_cap`**| **`20`** | **-** | **Point count expectation cap.** |
+| **`rule_min_points_cap`**| **`60`** | **-** | **Point count expectation cap.** |
 | **`max_width_diff_ratio`**| **`3.5`** | **-** | **Symmetry (Symmetry/Shape) check.** |
 | `pca_min_scatter` | `0.02` | - | Min scattering for 3D shape. |
-| `verticality_min` | `0.45` | - | Min verticality threshold. |
+| `verticality_min` | **`0.65`** | - | Min verticality threshold. |
+| `min_intensity` | **`5.0`** | - | Min average intensity for any cone detection. |
+| `rule_yellow_intensity_threshold` | **`25.0`** | - | Intensity threshold to distinguish YELLOW from BLUE cones. |
+| `rule_color_range` | **`5.0`** | m | Max range for intensity-based color classification. |
 
 ## 5. Spatial Aggregation
 | Parameter | Default | Unit | Description |

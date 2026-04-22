@@ -8,7 +8,7 @@ from launch_ros.actions import Node
 def generate_launch_description():
     # --- 1. GENERAL ARGUMENTS ---
     bag_arg = DeclareLaunchArgument('bag', default_value='', description='Path to rosbag to play')
-    cl_algo_arg = DeclareLaunchArgument('clustering_algorithm', default_value='grid', description='Algorithm: grid, euclidean, string, dbscan, hdbscan, voxel')
+    cl_algo_arg = DeclareLaunchArgument('clustering_algorithm', default_value='grid', description='Algorithm: grid, euclidean, depth, dbscan, hdbscan, voxel')
     gr_type_arg = DeclareLaunchArgument('ground_remover_type', default_value='slope_based', description='Algorithm: bin_based, slope_based, patchworkpp')
     
     # --- 2. COMMON PARAMETERS ---
@@ -35,6 +35,9 @@ def generate_launch_description():
     db_eps_arg = DeclareLaunchArgument('dbscan_eps', default_value='0.30')
     # Voxel
     vox_grid_arg = DeclareLaunchArgument('voxel_grid_size', default_value='0.15')
+    # Depth-Clustering
+    depth_thr_arg = DeclareLaunchArgument('depth_theta_thr', default_value='10.0')
+    depth_rings_arg = DeclareLaunchArgument('depth_num_rings', default_value='16')
 
     # --- 5. ESTIMATION PARAMETERS ---
     pca_lin_arg = DeclareLaunchArgument('pca_max_linearity', default_value='0.8')
@@ -74,6 +77,8 @@ def generate_launch_description():
             'euclidean_tolerance': LaunchConfiguration('euclidean_tolerance'),
             'dbscan_eps': LaunchConfiguration('dbscan_eps'),
             'voxel_grid_size': LaunchConfiguration('voxel_grid_size'),
+            'depth_theta_thr': LaunchConfiguration('depth_theta_thr'),
+            'depth_num_rings': LaunchConfiguration('depth_num_rings'),
             'pca_max_linearity': LaunchConfiguration('pca_max_linearity'),
             'pca_min_scatter': LaunchConfiguration('pca_min_scatter'),
             'rule_dynamic_width_decay': LaunchConfiguration('rule_dynamic_width_decay'),
@@ -98,7 +103,7 @@ def generate_launch_description():
             'port': 8765,
             'address': '0.0.0.0',
             'tls': False,
-            'topic_whitelist': ['/perception/.*', '/tf', '/tf_static', '/rosout', '/lidar_points'],
+            'topic_whitelist': ['/perception/.*','/zed/zed_node/left/image_rect_color', '/tf', '/tf_static', '/rosout', '/lidar_points', '/zed/zed_node/rgb/color/rect/image'],
             'send_buffer_limit': 100000000,
             'use_compression': True,
             'max_update_ms': 50, # 20Hz update rate matches our target
@@ -132,6 +137,8 @@ def generate_launch_description():
         euc_tol_arg,
         db_eps_arg,
         vox_grid_arg,
+        depth_thr_arg,
+        depth_rings_arg,
         pca_lin_arg,
         pca_scat_arg,
         rule_decay_arg,

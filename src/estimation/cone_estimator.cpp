@@ -53,10 +53,10 @@ Cone ConeEstimator::estimate(const PointCloudPtr& cluster) {
     // Phase 2: Dynamic Thresholding and Classification
     float r = features.range;
 
-    // Dynamic point count threshold - Adjusted for 3.5cm Voxel Grid
-    // At 10m, 5 points are enough. At 2m, we cap at 20 points (physical limit of 3.5cm voxels on a cone)
+    // Dynamic point count threshold - Adjusted for 2.0cm Voxel Grid and 40-channel LiDAR
+    // At 10m, 5 points are enough. At 2m, we cap at 60 points (physical limit of 2.0cm voxels on a cone)
     int expected_min_points = std::max(3, static_cast<int>(config_.min_points_at_10m * (100.0f / (r*r)))); 
-    expected_min_points = std::min(20, expected_min_points); // CAP at 20 due to voxelization
+    expected_min_points = std::min(20, expected_min_points); // CAP at 60 due to 2cm voxelization and 40 channels
     
     // Soft-Pass Logic: If the shape is exceptionally vertical and symmetric, 
     // allow a 15% deficit in point count.
@@ -73,9 +73,9 @@ Cone ConeEstimator::estimate(const PointCloudPtr& cluster) {
         features.scattering < (config_.min_scatter * 0.5f)) {
         return cone;
     }
-
+ 
     // Verticality Check
-    if (features.verticality < 0.45f) { 
+    if (features.verticality < 0.65f) { 
         return cone;
     }
 
@@ -94,7 +94,7 @@ Cone ConeEstimator::estimate(const PointCloudPtr& cluster) {
 
     // Candidate accepted as a cone
     cone.confidence = 1.0f;
-    cone.color = ConeColor::BLUE; 
+    cone.color = ConeColor::BLUE;
     
     return cone;
 }

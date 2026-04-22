@@ -95,7 +95,9 @@ private:
     rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr sub_lidar_; ///< LiDAR point cloud subscriber.
     rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr sub_imu_;          ///< IMU subscriber for deskewing.
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr pub_markers_; ///< Visualization marker publisher.
+    rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr pub_slam_input_; ///< Dedicated SLAM input publisher.
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_cones_;   ///< Cone centroids publisher.
+    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_slam_cones_; ///< SLAM-specific cone coordinates publisher.
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_cone_points_; ///< Raw cone points publisher.
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_ground_;  ///< Ground points publisher (debug).
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_no_ground_; ///< Obstacle points publisher (debug).

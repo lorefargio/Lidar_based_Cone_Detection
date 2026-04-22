@@ -17,7 +17,7 @@ graph TD
     G --> H[Final Markers]
 
     subgraph "Phase 1: Stabilization"
-        B -- "3.5cm Voxel Filter" --> C
+        B -- "2.0cm Voxel Filter" --> C
     end
 
     subgraph "Phase 2: Grouping"
@@ -31,7 +31,7 @@ graph TD
 
 ### Stage Descriptions
 
-1.  **Pre-processing**: Rapid spatial truncation and early voxelization. The **3.5cm voxel** size is chosen to balance geometric fidelity (preserving the cone's shape) and cardinality management (reducing total points).
+1.  **Pre-processing**: Rapid spatial truncation and early voxelization. The **2.0cm voxel** size is chosen to leverage the high resolution of the 40-channel LiDAR (0.33° vertical) while reducing total points.
 2.  **Deskewing**: High-frequency IMU integration (NLERP) to compensate for sensor motion during the sweep.
 3.  **Ground Removal**: Binary segmentation of the environment into traversable surface and obstacle candidates (using Patchwork++ or Slope Analysis).
 4.  **Clustering**: Spatial grouping of obstacle points into candidate clusters.
