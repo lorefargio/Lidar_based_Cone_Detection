@@ -2,7 +2,7 @@
   <name>lidar_perception</name>
   <version>0.1.0</version>
   <description>High-performance modular LiDAR perception system for obstacle detection and classification.</description>
-  <maintainer email="">Lorenzo Fargione</maintainer>
+  <maintainer email="lore@todo.todo">Lorenzo Fargione</maintainer>
   <license>MIT</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
