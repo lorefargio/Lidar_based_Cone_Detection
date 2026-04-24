@@ -4,7 +4,7 @@
 #include <pcl/search/kdtree.h>
 #include <vector>
 
-namespace fs_perception {
+namespace lidar_perception {
 
 /**
  * @class DBSCANClusterer
@@ -47,4 +47,4 @@ private:
     int max_cluster_size_;    ///< Maximum size filter for clusters.
 };
 
-} // namespace fs_perception
+} // namespace lidar_perception

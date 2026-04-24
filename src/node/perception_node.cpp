@@ -23,13 +23,13 @@ using namespace std::chrono_literals;
 
 // Template instantiations for custom PCL point type
 namespace pcl {
-  template class PCLBase<fs_perception::PointT>;
-  template class VoxelGrid<fs_perception::PointT>;
+  template class PCLBase<lidar_perception::PointT>;
+  template class VoxelGrid<lidar_perception::PointT>;
 }
 
-namespace fs_perception {
+namespace lidar_perception {
 
-LidarPerceptionNode::LidarPerceptionNode() : Node("lidar_perception_node") {
+PerceptionNode::PerceptionNode() : Node("lidar_perception_node") {
     // --- 1. GENERAL PARAMETERS ---
     this->declare_parameter<std::string>("bag_path", "");
     this->declare_parameter<std::string>("clustering_algorithm", "grid");
@@ -242,7 +242,7 @@ LidarPerceptionNode::LidarPerceptionNode() : Node("lidar_perception_node") {
     // --- 7. PUBLISHERS & SUBSCRIBERS ---
     sub_lidar_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
         "/lidar_points", rclcpp::SensorDataQoS(), 
-        std::bind(&LidarPerceptionNode::callback, this, std::placeholders::_1));
+        std::bind(&PerceptionNode::callback, this, std::placeholders::_1));
 
     if (this->get_parameter("use_deskewing").as_bool()) {
         sub_imu_ = this->create_subscription<sensor_msgs::msg::Imu>(
@@ -259,7 +259,7 @@ LidarPerceptionNode::LidarPerceptionNode() : Node("lidar_perception_node") {
     pub_no_ground_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/perception/no_ground", rclcpp::SensorDataQoS());
 }
 
-LidarPerceptionNode::~LidarPerceptionNode() {
+PerceptionNode::~PerceptionNode() {
     if (profiler_) {
         profiler_->saveToJSON(json_file_path_);
         RCLCPP_INFO(this->get_logger(), "Profiling data saved to JSON before exit.");
@@ -270,7 +270,7 @@ LidarPerceptionNode::~LidarPerceptionNode() {
     }
 }
 
-void LidarPerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPtr msg) {
+void PerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPtr msg) {
     if (!msg) return;
 
     frame_counter_++;
@@ -347,9 +347,9 @@ void LidarPerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPt
     if (profiler_) profiler_->stopTimer("ground_removal");
     
     if (frame_counter_ % this->get_parameter("debug_pub_freq").as_int() == 0) {
-        sensor_msgs::msg::PointCloud2 no_ground_msg;
-        pcl::toROSMsg(*obstacles_str_, no_ground_msg);
-        no_ground_msg.header = msg->header;
+        auto no_ground_msg = std::make_unique<sensor_msgs::msg::PointCloud2>();
+        pcl::toROSMsg(*obstacles_str_, *no_ground_msg);
+        no_ground_msg->header = msg->header; // Rigorous timestamp preservation
         pub_no_ground_->publish(std::move(no_ground_msg));
     }
     
@@ -481,9 +481,9 @@ void LidarPerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPt
     /**
      * @phase Output Generation
      * Construction and publication of visualization markers and detection messages.
-     * Uses std::move to efficiently transfer ownership of large message structures.
+     * Uses std::unique_ptr and std::move to enable zero-copy IPC and minimize latency.
      */
-    visualization_msgs::msg::MarkerArray markers;
+    auto markers = std::make_unique<visualization_msgs::msg::MarkerArray>();
     PointCloud cones_cloud_out; 
     PointCloud cone_points_out;
 
@@ -492,14 +492,14 @@ void LidarPerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPt
     delete_marker.header = msg->header;
     delete_marker.ns = "cones";
     delete_marker.id = 0;
-    markers.markers.push_back(delete_marker);
+    markers->markers.push_back(delete_marker);
 
     visualization_msgs::msg::Marker delete_labels;
     delete_labels.action = visualization_msgs::msg::Marker::DELETEALL;
     delete_labels.header = msg->header;
     delete_labels.ns = "distance_labels";
     delete_labels.id = 0;
-    markers.markers.push_back(delete_labels);
+    markers->markers.push_back(delete_labels);
 
     int id_counter = 1;
     for (const auto& cone : final_cones) {
@@ -524,7 +524,7 @@ void LidarPerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPt
         } else { 
             m.color.b = 1.0f; m.color.r = 0.0f; m.color.g = 0.0f; 
         }
-        markers.markers.push_back(m);
+        markers->markers.push_back(m);
 
         visualization_msgs::msg::Marker t;
         t.header = msg->header;
@@ -542,7 +542,7 @@ void LidarPerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPt
         std::stringstream ss;
         ss << std::fixed << std::setprecision(2) << cone.range << "m";
         t.text = ss.str();
-        markers.markers.push_back(t);
+        markers->markers.push_back(t);
 
         PointT p_out;
         p_out.x = cone.x; p_out.y = cone.y; p_out.z = cone.z;
@@ -555,14 +555,14 @@ void LidarPerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPt
     }
     pub_markers_->publish(std::move(markers));
 
-    sensor_msgs::msg::PointCloud2 cones_msg;
-    pcl::toROSMsg(cones_cloud_out, cones_msg);
-    cones_msg.header = msg->header; 
+    auto cones_msg = std::make_unique<sensor_msgs::msg::PointCloud2>();
+    pcl::toROSMsg(cones_cloud_out, *cones_msg);
+    cones_msg->header = msg->header; // Explicit timestamp inheritance
     pub_cones_->publish(std::move(cones_msg));
 
-    sensor_msgs::msg::PointCloud2 cone_points_msg;
-    pcl::toROSMsg(cone_points_out, cone_points_msg);
-    cone_points_msg.header = msg->header; 
+    auto cone_points_msg = std::make_unique<sensor_msgs::msg::PointCloud2>();
+    pcl::toROSMsg(cone_points_out, *cone_points_msg);
+    cone_points_msg->header = msg->header; // Explicit timestamp inheritance
     pub_cone_points_->publish(std::move(cone_points_msg));
 
     if (profiler_) {
@@ -580,7 +580,7 @@ void LidarPerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPt
     }
 }
 
-void LidarPerceptionNode::preProcess(PointCloudPtr cloud) {
+void PerceptionNode::preProcess(PointCloudPtr cloud) {
     if (cloud->empty()) return;
 
     /**
@@ -605,7 +605,7 @@ void LidarPerceptionNode::preProcess(PointCloudPtr cloud) {
     cloud->is_dense = true;
 }
 
-} // namespace fs_perception
+} // namespace lidar_perception
 
 /**
  * @brief Main execution entry point.
@@ -614,7 +614,7 @@ void LidarPerceptionNode::preProcess(PointCloudPtr cloud) {
  */
 int main(int argc, char **argv) {
     rclcpp::init(argc, argv);
-    auto node = std::make_shared<fs_perception::LidarPerceptionNode>();
+    auto node = std::make_shared<lidar_perception::PerceptionNode>();
     rclcpp::spin(node);
     rclcpp::shutdown();
     return 0;

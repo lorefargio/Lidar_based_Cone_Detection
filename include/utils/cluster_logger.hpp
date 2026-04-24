@@ -5,7 +5,7 @@
 #include <fstream>
 #include "utils/types.hpp"
 
-namespace fs_perception {
+namespace lidar_perception {
 
 /**
  * @class ClusterLogger
@@ -44,4 +44,4 @@ private:
     std::vector<ClusterFeatures> data_;  ///< Buffer for cluster features.
 };
 
-} // namespace fs_perception
+} // namespace lidar_perception

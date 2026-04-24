@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(fs_lidar_perception)
+project(lidar_perception)
 
 # --- 1. BUILD TYPE CONFIGURATION ---
 # Default to 'Release' build type for optimized perception performance.

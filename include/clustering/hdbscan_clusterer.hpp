@@ -4,13 +4,13 @@
 #include <pcl/search/kdtree.h>
 #include <vector>
 
-namespace fs_perception {
+namespace lidar_perception {
 
 /**
  * @class HDBSCANClusterer
  * @brief Lidar-Aware Hierarchical Density-Based Spatial Clustering.
  * 
- * Optimized for Formula Student: builds a Minimum Spanning Forest to capture 
+ * Optimized: builds a Minimum Spanning Forest to capture 
  * all isolated cones and uses a distance-scaled Mutual Reachability metric.
  */
 class HDBSCANClusterer : public ClustererInterface {
@@ -57,4 +57,4 @@ private:
     };
 };
 
-} // namespace fs_perception
+} // namespace lidar_perception

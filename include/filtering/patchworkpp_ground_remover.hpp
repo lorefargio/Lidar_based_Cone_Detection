@@ -5,7 +5,7 @@
 #include <memory>
 
 // patchworkpp_ground_remover.hpp
-namespace fs_perception {
+namespace lidar_perception {
 
 /**
  * @class PatchworkppGroundRemover
@@ -34,6 +34,6 @@ private:
     std::vector<int> original_indices_;
 };
 
-} // namespace fs_perception
+} // namespace lidar_perception
 
-// namespace fs_perception
+// namespace lidar_perception

@@ -3,7 +3,7 @@
 #include "utils/types.hpp"
 #include <vector>
 
-namespace fs_perception {
+namespace lidar_perception {
 
 /**
  * @class ClustererInterface
@@ -24,4 +24,4 @@ public:
                          std::vector<PointCloudPtr>& clusters) = 0;
 };
 
-} // namespace fs_perception
+} // namespace lidar_perception

@@ -2,7 +2,7 @@
 
 #include "utils/types.hpp"
 
-namespace fs_perception {
+namespace lidar_perception {
 
 /**
  * @class ConeEstimator
@@ -81,4 +81,4 @@ private:
     Config config_; ///< Current configuration parameters.
 };
 
-} // namespace fs_perception
+} // namespace lidar_perception

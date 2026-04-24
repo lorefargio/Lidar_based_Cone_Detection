@@ -7,7 +7,7 @@
 #include <fstream>
 #include <iostream>
 
-namespace fs_perception {
+namespace lidar_perception {
 
 /**
  * @struct FrameData
@@ -96,4 +96,4 @@ private:
     std::map<std::string, std::chrono::high_resolution_clock::time_point> timers_;
 };
 
-} // namespace fs_perception
+} // namespace lidar_perception

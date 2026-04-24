@@ -4,7 +4,7 @@
 #include <cmath>
 #include <limits>
 
-namespace fs_perception {
+namespace lidar_perception {
 
 HDBSCANClusterer::HDBSCANClusterer() : HDBSCANClusterer(Config()) {}
 
@@ -120,4 +120,4 @@ void HDBSCANClusterer::extract(const PointCloudPtr& cloud, const std::vector<int
     clusters.push_back(cluster);
 }
 
-} // namespace fs_perception
+} // namespace lidar_perception

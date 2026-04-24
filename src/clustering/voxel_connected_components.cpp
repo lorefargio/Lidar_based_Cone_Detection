@@ -1,7 +1,7 @@
 #include "clustering/voxel_connected_components.hpp"
 #include <queue>
 
-namespace fs_perception {
+namespace lidar_perception {
 
 VoxelConnectedComponents::VoxelConnectedComponents(float voxel_size, int min_cluster_size, int max_cluster_size)
     : voxel_size_(voxel_size), inv_voxel_size_(1.0f / voxel_size), 
@@ -79,4 +79,4 @@ void VoxelConnectedComponents::cluster(const PointCloudPtr& cloud, std::vector<P
     }
 }
 
-} // namespace fs_perception
+} // namespace lidar_perception

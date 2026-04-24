@@ -10,7 +10,7 @@
 #include <iostream> 
 #include <rclcpp/rclcpp.hpp>
 
-namespace fs_perception {
+namespace lidar_perception {
 
 ConeEstimator::ConeEstimator() : config_(Config()) {}
 
@@ -168,4 +168,4 @@ ClusterFeatures ConeEstimator::extractFeatures(const PointCloudPtr& cluster) {
     return f;
 }
 
-} // namespace fs_perception
+} // namespace lidar_perception

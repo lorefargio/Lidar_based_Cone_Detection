@@ -3,7 +3,7 @@
 #include <unordered_map>
 #include <cmath>
 
-namespace fs_perception {
+namespace lidar_perception {
 
 DBSCANClusterer::DBSCANClusterer(float eps, int min_pts, int min_cluster_size, int max_cluster_size)
     : eps_(eps), min_pts_(min_pts), min_cluster_size_(min_cluster_size), max_cluster_size_(max_cluster_size) {}
@@ -130,4 +130,4 @@ void DBSCANClusterer::cluster(const PointCloudPtr& cloud, std::vector<PointCloud
     }
 }
 
-} // namespace fs_perception
+} // namespace lidar_perception

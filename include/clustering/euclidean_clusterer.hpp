@@ -2,7 +2,7 @@
 
 #include "clustering/clusterer_interface.hpp"
 
-namespace fs_perception {
+namespace lidar_perception {
 
 /**
  * @class EuclideanClusterer
@@ -35,4 +35,4 @@ private:
     int max_cluster_size_;    ///< Maximum size filter.
 };
 
-} // namespace fs_perception
+} // namespace lidar_perception

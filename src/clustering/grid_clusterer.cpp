@@ -2,7 +2,7 @@
 #include <queue>
 #include <cmath>
 
-namespace fs_perception {
+namespace lidar_perception {
 
 GridClusterer::GridClusterer(float grid_resolution, float max_range, int min_cluster_size, int max_cluster_size)
     : grid_res_(grid_resolution), max_range_(max_range), min_size_(min_cluster_size), max_size_(max_cluster_size) {
@@ -98,4 +98,4 @@ void GridClusterer::cluster(const PointCloudPtr& cloud, std::vector<PointCloudPt
     }
 }
 
-} // namespace fs_perception
+} // namespace lidar_perception

@@ -56,7 +56,7 @@ def generate_launch_description():
 
     # Our perception node
     perception_node = Node(
-        package='fs_lidar_perception',
+        package='lidar_perception',
         executable='perception_node',
         name='lidar_perception_node',
         output='screen',

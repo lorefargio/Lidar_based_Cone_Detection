@@ -3,7 +3,7 @@
 #include <pcl/segmentation/extract_clusters.h>
 #include <pcl/filters/voxel_grid.h>
 
-namespace fs_perception {
+namespace lidar_perception {
 
 EuclideanClusterer::EuclideanClusterer(float cluster_tolerance, int min_cluster_size, int max_cluster_size)
     : cluster_tolerance_(cluster_tolerance), 
@@ -56,4 +56,4 @@ void EuclideanClusterer::cluster(const PointCloudPtr& cloud, std::vector<PointCl
     }
 }
 
-} // namespace fs_perception
+} // namespace lidar_perception

@@ -3,7 +3,7 @@
 #include <pcl/common/common.h>
 #include <pcl/common/transforms.h>
 
-namespace fs_perception {
+namespace lidar_perception {
 
 Deskewer::Deskewer(const Config& config) : config_(config) {
 }
@@ -160,4 +160,4 @@ bool Deskewer::getInterpolatedOrientation(double timestamp,
     return true;
 }
 
-} // namespace fs_perception
+} // namespace lidar_perception

@@ -38,5 +38,5 @@ The implementation leverages the mature `pcl::EuclideanClusterExtraction` class,
 - **Space Complexity**: $O(N)$ for the KD-Tree structure.
 
 ## Citations & Literature
-- **Primary Method**: Rusu, R. B. (2010). *"Semantic 3D Object Maps for Everyday Manipulation."* PhD Thesis, Technische Universität München.
+- **Primary Method**: Rusu, R. B. (2010). *"Semantic 3D Object Maps for Everyday Manipulation."* Technische Universität München.
 - **KD-Tree Foundation**: Bentley, J. L. (1975). *"Multidimensional binary search trees used for associative searching."* Communications of the ACM, 18(9), 509-517.

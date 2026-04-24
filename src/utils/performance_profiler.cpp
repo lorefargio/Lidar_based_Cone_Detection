@@ -3,7 +3,7 @@
 #include <numeric>
 #include <iomanip>
 
-namespace fs_perception {
+namespace lidar_perception {
 
 PerformanceProfiler::PerformanceProfiler(const std::string& algorithm_name) 
     : algorithm_name_(algorithm_name), current_frame_id_(0) {
@@ -97,4 +97,4 @@ void PerformanceProfiler::saveToJSON(const std::string& filepath) {
     out.close();
 }
 
-} // namespace fs_perception
+} // namespace lidar_perception

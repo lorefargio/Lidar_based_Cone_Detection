@@ -3,7 +3,7 @@
 #include <vector>
 #include <pcl/filters/voxel_grid.h>
 
-namespace fs_perception {
+namespace lidar_perception {
 
 SlopeBasedGroundRemover::SlopeBasedGroundRemover() : config_(Config()) {
     sectors_.resize(config_.segments);
@@ -115,4 +115,4 @@ void SlopeBasedGroundRemover::removeGround(const PointCloudConstPtr& cloud_in, P
     }
 }
 
-} // namespace fs_perception
+} // namespace lidar_perception

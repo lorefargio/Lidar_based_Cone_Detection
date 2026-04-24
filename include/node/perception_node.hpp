@@ -4,11 +4,9 @@
  * 
  * This module integrates several stages: point cloud pre-processing (including early voxelization),
  * ground removal, object clustering via various spatial partition strategies, and 
- * rule-based cone estimation. It leverages high-performance ROS 2 primitives such as 
- * SensorDataQoS and efficient memory management using std::move to minimize latency.
- * 
- * @author Gemini CLI (Autonomous Agent)
- * @date 2026-03-30
+ * rule-based object estimation. It leverages high-performance ROS 2 primitives such as 
+ * SensorDataQoS and efficient memory management using std::unique_ptr and std::move to minimize latency. 
+ *
  */
 
 #pragma once
@@ -32,14 +30,14 @@
 #include "utils/deskewer.hpp"
 #include "utils/cluster_logger.hpp"
 
-namespace fs_perception {
+namespace lidar_perception {
 
 /**
- * @class LidarPerceptionNode
+ * @class PerceptionNode
  * @brief Central controller for the LiDAR perception stack.
  * 
- * The LidarPerceptionNode manages the transformation of raw sensor data into semantic 
- * cone detections. It implements a multi-stage pipeline:
+ * The PerceptionNode manages the transformation of raw sensor data into semantic 
+ * object detections. It implements a multi-stage pipeline:
  * 1.  **Pre-processing:** Fast distance truncation and early voxelization for noise reduction.
  * 2.  **Deskewing:** Compensation for ego-motion using IMU integration.
  * 3.  **Ground Removal:** Separation of traversable surface points from obstacles.
@@ -47,27 +45,27 @@ namespace fs_perception {
  * 5.  **Estimation:** Geometric and statistical validation of candidates using PCA-derived features.
  * 
  * Optimized for low-latency execution through the use of rclcpp::SensorDataQoS and 
- * asynchronous message passing with std::move.
+ * asynchronous message passing with std::unique_ptr and std::move.
  */
-class LidarPerceptionNode : public rclcpp::Node {
+class PerceptionNode : public rclcpp::Node {
 public:
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW
     
     /**
-     * @brief Constructs the LidarPerceptionNode.
+     * @brief Constructs the PerceptionNode.
      * 
      * Performs parameter declaration, initializes modular pipeline components (ground removers, 
      * clusterers, estimators), and establishes communication interfaces with SensorDataQoS.
      */
-    LidarPerceptionNode();
+    PerceptionNode();
 
     /**
-     * @brief Finalizes the LidarPerceptionNode.
+     * @brief Finalizes the PerceptionNode.
      * 
      * Ensures all persistence operations, such as flushing performance profiling data to 
      * JSON and cluster characteristics to CSV, are completed before shutdown.
      */
-    ~LidarPerceptionNode() override;
+    ~PerceptionNode() override;
 
 private:
     /**
@@ -95,10 +93,8 @@ private:
     rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr sub_lidar_; ///< LiDAR point cloud subscriber.
     rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr sub_imu_;          ///< IMU subscriber for deskewing.
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr pub_markers_; ///< Visualization marker publisher.
-    rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr pub_slam_input_; ///< Dedicated SLAM input publisher.
-    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_cones_;   ///< Cone centroids publisher.
-    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_slam_cones_; ///< SLAM-specific cone coordinates publisher.
-    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_cone_points_; ///< Raw cone points publisher.
+    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_cones_;   ///< Object centroids publisher.
+    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_cone_points_; ///< Raw object points publisher.
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_ground_;  ///< Ground points publisher (debug).
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_no_ground_; ///< Obstacle points publisher (debug).
 
@@ -108,7 +104,7 @@ private:
     PointCloudPtr ground_str_{new PointCloud};         ///< Buffer for ground points.
     std::unique_ptr<GroundRemoverInterface> ground_remover_; ///< Abstract ground removal interface.
     std::unique_ptr<ClustererInterface> clusterer_;          ///< Abstract clustering interface.
-    std::unique_ptr<ConeEstimator> estimator_;               ///< Geometric cone classification engine.
+    std::unique_ptr<ConeEstimator> estimator_;               ///< Geometric object classification engine.
     std::unique_ptr<Deskewer> deskewer_;                     ///< Lidar motion compensation module.
     
     // Benchmarking and diagnostics
@@ -119,4 +115,4 @@ private:
     int frame_counter_ = 0;                         ///< Incremental frame index.
 };
 
-} // namespace fs_perception
+} // namespace lidar_perception

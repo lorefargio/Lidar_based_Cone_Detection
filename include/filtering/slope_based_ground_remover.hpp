@@ -4,7 +4,7 @@
 #include <vector>
 #include <cmath>
 
-namespace fs_perception {
+namespace lidar_perception {
 
 /**
  * @class SlopeBasedGroundRemover
@@ -59,4 +59,4 @@ private:
     std::vector<std::vector<int>> sectors_; ///< Persistent sector buffer.
 };
 
-} // namespace fs_perception
+} // namespace lidar_perception

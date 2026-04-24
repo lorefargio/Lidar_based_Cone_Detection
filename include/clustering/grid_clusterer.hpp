@@ -4,7 +4,7 @@
 #include <vector>
 #include <unordered_map>
 
-namespace fs_perception {
+namespace lidar_perception {
 
 /**
  * @class GridClusterer
@@ -59,4 +59,4 @@ private:
     }
 };
 
-} // namespace fs_perception
+} // namespace lidar_perception

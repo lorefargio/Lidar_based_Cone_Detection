@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <pcl/filters/voxel_grid.h>
 
-namespace fs_perception {
+namespace lidar_perception {
 
 BinBasedGroundRemover::BinBasedGroundRemover() : config_(Config()) {
     grid_.resize(config_.segments * config_.bins);
@@ -113,4 +113,4 @@ void BinBasedGroundRemover::removeGround(const PointCloudConstPtr& cloud_in, Poi
     }
 }
 
-} // namespace fs_perception
+} // namespace lidar_perception

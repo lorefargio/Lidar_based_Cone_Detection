@@ -4,7 +4,7 @@
 #include "clustering/clusterer_interface.hpp"
 #include <vector>
 
-namespace fs_perception {
+namespace lidar_perception {
 
 /**
  * @class DepthClusterer
@@ -56,4 +56,4 @@ private:
     float hor_res_rad_; ///< Horizontal angular resolution.
 };
 
-} // namespace fs_perception
+} // namespace lidar_perception

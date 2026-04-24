@@ -4,7 +4,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace fs_perception {
+namespace lidar_perception {
 
 /**
  * @struct VoxelKey
@@ -74,4 +74,4 @@ private:
     int max_cluster_size_;    ///< Maximum size filter for clusters.
 };
 
-} // namespace fs_perception
+} // namespace lidar_perception

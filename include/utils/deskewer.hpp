@@ -9,7 +9,7 @@
 #include <Eigen/Geometry>
 #include "utils/types.hpp"
 
-namespace fs_perception {
+namespace lidar_perception {
 
 /**
  * @class Deskewer
@@ -77,4 +77,4 @@ private:
     // or we only care about the relative rotation during the sweep.
 };
 
-} // namespace fs_perception
+} // namespace lidar_perception

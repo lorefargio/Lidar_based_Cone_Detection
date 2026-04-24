@@ -3,7 +3,7 @@
 #include <queue>
 #include <algorithm>
 
-namespace fs_perception {
+namespace lidar_perception {
 
 DepthClusterer::DepthClusterer() : DepthClusterer(Config()) {}
 
@@ -120,4 +120,4 @@ void DepthClusterer::cluster(const PointCloudPtr& cloud, std::vector<PointCloudP
     }
 }
 
-} // namespace fs_perception
+} // namespace lidar_perception

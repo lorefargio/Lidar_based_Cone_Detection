@@ -2,7 +2,7 @@
 #include <iostream>
 #include <iomanip>
 
-namespace fs_perception {
+namespace lidar_perception {
 
 ClusterLogger::ClusterLogger(const std::string& algo_name) : algo_name_(algo_name) {
     // Pre-reserve to avoid frequent reallocations
@@ -52,4 +52,4 @@ void ClusterLogger::saveToCSV(const std::string& filepath) {
     out.close();
 }
 
-} // namespace fs_perception
+} // namespace lidar_perception

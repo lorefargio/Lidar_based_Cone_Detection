@@ -3,7 +3,7 @@
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 
-namespace fs_perception {
+namespace lidar_perception {
 
 /**
  * @struct PointXYZIRT
@@ -20,12 +20,12 @@ struct PointXYZIRT {
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW ///< SSE alignment mandate for Eigen operations.
 } EIGEN_ALIGN16;
 
-} // namespace fs_perception
+} // namespace lidar_perception
 
 /**
  * @brief Registration macro for PCL integration.
  */
-POINT_CLOUD_REGISTER_POINT_STRUCT(fs_perception::PointXYZIRT,
+POINT_CLOUD_REGISTER_POINT_STRUCT(lidar_perception::PointXYZIRT,
     (float, x, x)
     (float, y, y)
     (float, z, z)
@@ -34,7 +34,7 @@ POINT_CLOUD_REGISTER_POINT_STRUCT(fs_perception::PointXYZIRT,
     (uint16_t, ring, ring)
 )
 
-namespace fs_perception {
+namespace lidar_perception {
     using PointT = PointXYZIRT;
     using PointCloud = pcl::PointCloud<PointT>;
     using PointCloudPtr = PointCloud::Ptr;
@@ -42,7 +42,7 @@ namespace fs_perception {
 
     /**
      * @enum ConeColor
-     * @brief Categorical labels for track boundary classification.
+     * @brief Categorical labels for object classification.
      */
     enum class ConeColor { 
         UNKNOWN,      
@@ -80,7 +80,7 @@ namespace fs_perception {
 
     /**
      * @struct Cone
-     * @brief Perceptual primitive representing a validated track boundary.
+     * @brief Perceptual primitive representing a validated object.
      */
     struct Cone {
         float x, y, z;        
@@ -92,4 +92,4 @@ namespace fs_perception {
         PointCloudPtr cloud;  
         ClusterFeatures features; 
     };
-}
+    } // namespace lidar_perception

@@ -11,7 +11,7 @@
 
 #include "utils/types.hpp"
 
-namespace fs_perception {
+namespace lidar_perception {
 
 /**
  * @class GroundRemoverInterface
@@ -52,4 +52,4 @@ protected:
     float voxel_size_ = 0.0f; ///< Dimension of the voxel filter; 0.0 indicates a disabled state.
 };
 
-} // namespace fs_perception
+} // namespace lidar_perception

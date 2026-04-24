@@ -16,7 +16,7 @@ The `ConeColor` enumeration provides a semantic link to Camera-based object dete
 ## Output Streams for Fusion
 
 ### /perception/cones (Centroid Data)
-Publishes the localized centroids. The `intensity` field is repurposed to carry the radial range $\rho$, providing a direct high-bandwidth channel for SLAM algorithms without requiring additional message deserialization.
+Publishes the localized centroids. The `intensity` field is repurposed to carry the radial range $\rho$, providing a direct high-bandwidth channel for downstream consumers without requiring additional message deserialization.
 
 ### /perception/cone_points (Cluster Volumes)
 Publishes the union of all points $\mathcal{P} \in \mathcal{C}_k$ for validated cones. This stream is critical for **Contour-based Fusion**, allowing for precise alignment checks against the semantic segments in the image.

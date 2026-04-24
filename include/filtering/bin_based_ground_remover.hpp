@@ -14,7 +14,7 @@
 #include <vector>
 #include <limits>
 
-namespace fs_perception {
+namespace lidar_perception {
 
 /**
  * @class BinBasedGroundRemover
@@ -83,4 +83,4 @@ private:
     std::vector<Bin> grid_;     ///< A flattened vector representing the 2D polar bin structure.
 };
 
-} // namespace fs_perception
+} // namespace lidar_perception

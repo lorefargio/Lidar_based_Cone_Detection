@@ -1,7 +1,7 @@
 # High-Performance LiDAR Perception for Autonomous Racing
 
 ## Abstract
-This repository implements a modular, high-performance perception system designed for track-boundary localization (traffic cones) in Formula Student Driverless environments. The system is engineered for **Humble ROS 2** and optimized for a 20Hz update rate.
+This repository implements a modular, high-performance perception system designed for localization (traffic cones) in autonomous environments. The system is engineered for **Humble ROS 2** and optimized for a 20Hz update rate.
 
 ## System Architecture
 The pipeline is optimized for **Stability** and **Fluidity** through a three-stage refinement model:
@@ -21,6 +21,8 @@ For detailed theoretical derivation and implementation justifications, refer to:
 
 ## Core Optimization Principles
 *   **Temporal Stability**: Weighted centroid aggregation for smooth coordinate reporting.
+*   **Rigorous Timestamp Preservation**: All output messages (/perception/cones, /perception/cone_points) inherit the exact `header.stamp` of the hardware-triggered `/lidar_points` message, ensuring downstream fusion nodes maintain perfect synchronization regardless of processing latency.
+*   **Zero-Copy IPC**: Optimized for Inter-Process Communication using `std::unique_ptr` and ROS 2 middleware bypasses, significantly reducing deserialization overhead for high-bandwidth point cloud streams.
 *   **Algorithmic Determinism**: Transition from $O(N \log N)$ to $O(N)$ via flat-grid spatial partitioning.
 *   **Hysteresis Logic**: Multi-threshold validation to prevent detection flickering.
 
@@ -30,5 +32,5 @@ For detailed theoretical derivation and implementation justifications, refer to:
 colcon build --cmake-args -DCMAKE_BUILD_TYPE=Release
 
 # Execution
-ros2 launch fs_lidar_perception foxglove.launch.py ground_remover_type:=patchworkpp
+ros2 launch lidar_perception foxglove.launch.py ground_remover_type:=patchworkpp
 ```

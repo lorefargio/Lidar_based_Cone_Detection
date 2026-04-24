@@ -3,7 +3,7 @@
 #include <pcl/filters/voxel_grid.h>
 #include <iostream>
 
-namespace fs_perception {
+namespace lidar_perception {
 
 PatchworkppGroundRemover::PatchworkppGroundRemover(const patchwork::Params& params) 
     : params_(params) {
@@ -69,4 +69,4 @@ void PatchworkppGroundRemover::removeGround(const PointCloudConstPtr& cloud_in,
     }
 }
 
-} // namespace fs_perception
+} // namespace lidar_perception
