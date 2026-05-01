@@ -59,7 +59,7 @@ done
 echo -e "\n>>> PHASE 2: Testing Ground Removal Algorithms (Clustering: grid)"
 for GR_ALGO in "${GROUND_ALGOS[@]}"; do
     # Skip slope_based if already tested in Phase 1 with grid clustering
-    if [ "$GR_ALGO" == "slope_based" ]; then
+    if [ "$GR_ALGO" == "patchworkpp" ]; then
         echo -e "\nSkipping Ground Removal: \e[1;32m$GR_ALGO\e[0m (Already tested in Phase 1 with grid)"
         continue
     fi
