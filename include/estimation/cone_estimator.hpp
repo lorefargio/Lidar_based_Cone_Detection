@@ -38,6 +38,7 @@ public:
         float max_linearity = 0.8f;         ///< Threshold to reject highly linear objects (e.g., posts, legs).
         float max_planarity = 0.8f;         ///< Threshold to reject highly planar objects (e.g., walls).
         float min_scatter = 0.02f;          ///< Threshold to ensure the object has a volumetric shape.
+        float min_verticality = 0.65f;       ///< Threshold for object verticality.
     };
 
     /**

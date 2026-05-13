@@ -37,6 +37,7 @@ PerceptionNode::PerceptionNode() : Node("lidar_perception_node") {
     this->declare_parameter<std::string>("estimator_type", "rule_based");
     this->declare_parameter<std::string>("log_dir", "log_profiler/");
     this->declare_parameter<bool>("log_clusters", true);
+    this->declare_parameter<bool>("log_all_clusters", false);
     
     // Common geometric/filtering parameters
     this->declare_parameter<double>("sensor_z", -0.50);
@@ -92,15 +93,21 @@ PerceptionNode::PerceptionNode() : Node("lidar_perception_node") {
         patchwork::Params pw_params;
         this->declare_parameter<int>("pw_num_iter", 3);
         this->declare_parameter<double>("pw_th_dist", 0.02);
+        this->declare_parameter<double>("pw_th_seeds", 0.02);
+        this->declare_parameter<double>("pw_th_dist_v", 0.1);
+        this->declare_parameter<double>("pw_th_seeds_v", 0.02);
         this->declare_parameter<double>("pw_min_range", 0.5);
         this->declare_parameter<double>("pw_uprightness_thr", 0.707);
         this->declare_parameter<bool>("pw_enable_RNR", true); 
-        this->declare_parameter<bool>("pw_enable_TGR", true); // Terrain Gradient Robustness
+        this->declare_parameter<bool>("pw_enable_TGR", true); 
 
         pw_params.sensor_height = std::abs(sensor_z);
         pw_params.max_range = max_range;
         pw_params.num_iter = this->get_parameter("pw_num_iter").as_int();
         pw_params.th_dist = this->get_parameter("pw_th_dist").as_double();
+        pw_params.th_seeds = this->get_parameter("pw_th_seeds").as_double();
+        pw_params.th_dist_v = this->get_parameter("pw_th_dist_v").as_double();
+        pw_params.th_seeds_v = this->get_parameter("pw_th_seeds_v").as_double();
         pw_params.min_range = this->get_parameter("pw_min_range").as_double();
         pw_params.uprightness_thr = this->get_parameter("pw_uprightness_thr").as_double();
         pw_params.enable_RNR = this->get_parameter("pw_enable_RNR").as_bool();
@@ -112,15 +119,10 @@ PerceptionNode::PerceptionNode() : Node("lidar_perception_node") {
 
     // Configure Modular Voxel Filter in Ground Remover
     this->declare_parameter<bool>("use_voxel_filter", false);
-    this->declare_parameter<double>("voxel_size", 0.09); // Recommended for older hardware
+    this->declare_parameter<double>("voxel_size", 0.02); // Recommended for older hardware
 
     if (this->get_parameter("use_voxel_filter").as_bool() && ground_remover_) {
         double leaf_size = this->get_parameter("voxel_size").as_double();
-        
-        // Safety check for memory limits on older hardware
-        if (leaf_size < 0.05) {
-            RCLCPP_WARN(this->get_logger(), "Voxel size %.2f might cause memory issues on this PC. Using 0.09m is safer.", leaf_size);
-        }
         
         ground_remover_->setVoxelFilter(static_cast<float>(leaf_size));
     }
@@ -178,6 +180,7 @@ PerceptionNode::PerceptionNode() : Node("lidar_perception_node") {
     this->declare_parameter<double>("pca_max_linearity", 0.8);
     this->declare_parameter<double>("pca_max_planarity", 0.8);
     this->declare_parameter<double>("pca_min_scatter", 0.02);
+    this->declare_parameter<double>("pca_min_verticality", 0.65);
     
     ConeEstimator::Config est_cfg;
     this->declare_parameter<double>("rule_min_height", 0.10);
@@ -198,6 +201,7 @@ PerceptionNode::PerceptionNode() : Node("lidar_perception_node") {
     est_cfg.max_linearity = static_cast<float>(this->get_parameter("pca_max_linearity").as_double());
     est_cfg.max_planarity = static_cast<float>(this->get_parameter("pca_max_planarity").as_double());
     est_cfg.min_scatter = static_cast<float>(this->get_parameter("pca_min_scatter").as_double());
+    est_cfg.min_verticality = static_cast<float>(this->get_parameter("pca_min_verticality").as_double());
     est_cfg.ground_z_level = sensor_z;
 
     estimator_ = std::make_unique<ConeEstimator>(est_cfg);
@@ -237,6 +241,7 @@ PerceptionNode::PerceptionNode() : Node("lidar_perception_node") {
     if (this->get_parameter("log_clusters").as_bool()) {
         cluster_logger_ = std::make_unique<ClusterLogger>(profile_name);
         csv_file_path_ = log_dir + "clusters_" + profile_name + ".csv";
+        config_json_file_path_ = log_dir + "config_" + profile_name + ".json";
     }
 
     // --- 7. PUBLISHERS & SUBSCRIBERS ---
@@ -266,8 +271,42 @@ PerceptionNode::~PerceptionNode() {
     }
     if (cluster_logger_ && !csv_file_path_.empty()) {
         cluster_logger_->saveToCSV(csv_file_path_);
-        RCLCPP_INFO(this->get_logger(), "Cluster analysis data saved to CSV before exit.");
+        saveConfig(config_json_file_path_);
+        RCLCPP_INFO(this->get_logger(), "Cluster analysis data and config saved before exit.");
     }
+}
+
+void PerceptionNode::saveConfig(const std::string& filepath) {
+    std::ofstream out(filepath);
+    if (!out.is_open()) return;
+
+    auto params = this->get_parameters(this->list_parameters({}, 0).names);
+    
+    out << "{\n";
+    for (size_t i = 0; i < params.size(); ++i) {
+        out << "  \"" << params[i].get_name() << "\": ";
+        if (params[i].get_type() == rclcpp::ParameterType::PARAMETER_STRING) {
+            out << "\"" << params[i].as_string() << "\"";
+        } else if (params[i].get_type() == rclcpp::ParameterType::PARAMETER_DOUBLE) {
+            out << params[i].as_double();
+        } else if (params[i].get_type() == rclcpp::ParameterType::PARAMETER_INTEGER) {
+            out << params[i].as_int();
+        } else if (params[i].get_type() == rclcpp::ParameterType::PARAMETER_BOOL) {
+            out << (params[i].as_bool() ? "true" : "false");
+        } else if (params[i].get_type() == rclcpp::ParameterType::PARAMETER_DOUBLE_ARRAY) {
+            out << "[";
+            auto arr = params[i].as_double_array();
+            for (size_t j = 0; j < arr.size(); ++j) {
+                out << arr[j] << (j < arr.size() - 1 ? ", " : "");
+            }
+            out << "]";
+        } else {
+            out << "null";
+        }
+        out << (i < params.size() - 1 ? ",\n" : "\n");
+    }
+    out << "}\n";
+    out.close();
 }
 
 void PerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPtr msg) {
@@ -298,17 +337,26 @@ void PerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPtr msg
     /**
      * @phase Pre-processing
      * Sequential execution of spatial truncation and early voxelization.
-     * Truncation is performed first to bound the coordinate space, preventing 
-     * potential overflow in the subsequent voxel grid filter.
      */
     if (profiler_) profiler_->startTimer("conversion"); 
 
     preProcess(raw_cloud_ptr_);
 
+    // --- Intensity Distance Normalization ---
+    // Objects further away return less light. We normalize to 10m to make classification stable.
+    const float REF_DIST_SQ = 10.0f * 10.0f;
+    for (auto& pt : raw_cloud_ptr_->points) {
+        float r2 = pt.x*pt.x + pt.y*pt.y + pt.z*pt.z;
+        if (r2 > 1.0f) {
+            pt.intensity = pt.intensity * (r2 / REF_DIST_SQ);
+            pt.intensity = std::min(255.0f, pt.intensity); // Clamp
+        }
+    }
+
     if (raw_cloud_ptr_->size() > 500) {
         pcl::VoxelGrid<PointT> early_vg;
         early_vg.setInputCloud(raw_cloud_ptr_);
-        early_vg.setLeafSize(0.02f, 0.02f, 0.02f); // 2cm isotropic voxel for 40-channel LiDAR
+        early_vg.setLeafSize(this->get_parameter("voxel_size").as_double(), this->get_parameter("voxel_size").as_double(), this->get_parameter("voxel_size").as_double());
         PointCloudPtr filtered(new PointCloud);
         early_vg.filter(*filtered);
         *raw_cloud_ptr_ = *filtered;
@@ -348,8 +396,18 @@ void PerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPtr msg
     
     if (frame_counter_ % this->get_parameter("debug_pub_freq").as_int() == 0) {
         auto no_ground_msg = std::make_unique<sensor_msgs::msg::PointCloud2>();
-        pcl::toROSMsg(*obstacles_str_, *no_ground_msg);
-        no_ground_msg->header = msg->header; // Rigorous timestamp preservation
+        
+        // Crea una nuvola temporanea per il debug
+        PointCloudPtr display_cloud(new PointCloud);
+        
+        // Applica un filtro voxel pesante (es. 10-15cm) SOLO per la pubblicazione
+        pcl::VoxelGrid<PointT> sor;
+        sor.setInputCloud(obstacles_str_);
+        sor.setLeafSize(0.15f, 0.15f, 0.15f); // 15cm: leggerissima per la rete
+        sor.filter(*display_cloud);
+
+        pcl::toROSMsg(*display_cloud, *no_ground_msg);
+        no_ground_msg->header = msg->header;
         pub_no_ground_->publish(std::move(no_ground_msg));
     }
     
@@ -422,12 +480,23 @@ void PerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPtr msg
 
     for (size_t i = 0; i < merged_clusters.size(); ++i) {
         auto cone = estimator_->estimate(merged_clusters[i]);
-        if (cone.confidence > 0.5f) {
-            if (cluster_logger_) {
+        
+        // Log cluster features if logging is enabled
+        if (cluster_logger_) {
+            if (this->get_parameter("log_all_clusters").as_bool()) {
+                // Log everything to analyze rejected clusters
+                cone.features.frame_id = frame_counter_;
+                cone.features.cluster_id = static_cast<int>(i);
+                cluster_logger_->addCluster(cone.features);
+            } else if (cone.confidence > 0.5f) {
+                // Log only successful detections (default)
                 cone.features.frame_id = frame_counter_;
                 cone.features.cluster_id = static_cast<int>(i);
                 cluster_logger_->addCluster(cone.features);
             }
+        }
+
+        if (cone.confidence > 0.5f) {
             candidate_cones.push_back(cone);
         }
     }
@@ -484,97 +553,105 @@ void PerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPtr msg
      * Uses std::unique_ptr and std::move to enable zero-copy IPC and minimize latency.
      */
     auto markers = std::make_unique<visualization_msgs::msg::MarkerArray>();
+    markers->markers.reserve(final_cones.size() * 2 + 2);
+
+    
     PointCloud cones_cloud_out; 
     PointCloud cone_points_out;
+    cones_cloud_out.reserve(final_cones.size());
+    cone_points_out.reserve(final_cones.size() * 50);
 
-    visualization_msgs::msg::Marker delete_marker;
-    delete_marker.action = visualization_msgs::msg::Marker::DELETEALL;
-    delete_marker.header = msg->header;
-    delete_marker.ns = "cones";
-    delete_marker.id = 0;
-    markers->markers.push_back(delete_marker);
+    
+    visualization_msgs::msg::Marker delete_template;
+    delete_template.header = msg->header;
+    delete_template.action = visualization_msgs::msg::Marker::DELETEALL;
+    delete_template.id = 0;
 
-    visualization_msgs::msg::Marker delete_labels;
-    delete_labels.action = visualization_msgs::msg::Marker::DELETEALL;
-    delete_labels.header = msg->header;
-    delete_labels.ns = "distance_labels";
-    delete_labels.id = 0;
-    markers->markers.push_back(delete_labels);
+    delete_template.ns = "cones";
+    markers->markers.push_back(delete_template);
+    delete_template.ns = "distance_labels";
+    markers->markers.push_back(delete_template);
 
+    
+    visualization_msgs::msg::Marker cone_template;
+    cone_template.header = msg->header;
+    cone_template.ns = "cones";
+    cone_template.type = visualization_msgs::msg::Marker::CYLINDER;
+    cone_template.action = visualization_msgs::msg::Marker::ADD;
+    cone_template.lifetime = rclcpp::Duration::from_seconds(0.2);
+    cone_template.scale.x = 0.22; cone_template.scale.y = 0.22;
+    cone_template.color.a = 1.0; 
+
+    visualization_msgs::msg::Marker text_template;
+    text_template.header = msg->header;
+    text_template.ns = "distance_labels";
+    text_template.type = visualization_msgs::msg::Marker::TEXT_VIEW_FACING;
+    text_template.action = visualization_msgs::msg::Marker::ADD;
+    text_template.lifetime = rclcpp::Duration::from_seconds(0.2);
+    text_template.scale.z = 0.15;
+    text_template.color.a = 1.0; text_template.color.r = 1.0; text_template.color.g = 1.0; text_template.color.b = 1.0;
+
+    
     int id_counter = 1;
     for (const auto& cone : final_cones) {
-        visualization_msgs::msg::Marker m;
-        m.header = msg->header; 
-        m.ns = "cones";
-        m.id = id_counter;
-        m.type = visualization_msgs::msg::Marker::CYLINDER;
-        m.action = visualization_msgs::msg::Marker::ADD;
-        m.lifetime = rclcpp::Duration::from_seconds(0.1); 
-
-        m.pose.position.x = cone.x;
-        m.pose.position.y = cone.y;
-        m.pose.position.z = cone.z + (cone.height / 2.0); 
-        m.scale.x = 0.22; m.scale.y = 0.22; m.scale.z = cone.height;
-        m.color.a = 0.8;
+        // --- Marker Cilindro ---
+        cone_template.id = id_counter;
+        cone_template.pose.position.x = cone.x;
+        cone_template.pose.position.y = cone.y;
+        cone_template.pose.position.z = cone.z + (cone.height / 2.0) + 0.05; 
+        cone_template.scale.z = cone.height;
         
-        if (cone.color == ConeColor::BLUE) { 
-            m.color.b = 1.0f; m.color.r = 0.0f; m.color.g = 0.0f; 
-        } else if (cone.color == ConeColor::YELLOW) { 
-            m.color.r = 1.0f; m.color.g = 1.0f; m.color.b = 0.0f; 
-        } else { 
-            m.color.b = 1.0f; m.color.r = 0.0f; m.color.g = 0.0f; 
-        }
-        markers->markers.push_back(m);
+        cone_template.color.r = (cone.color == ConeColor::YELLOW) ? 1.0f : 0.0f;
+        cone_template.color.g = (cone.color == ConeColor::YELLOW) ? 1.0f : 0.0f;
+        cone_template.color.b = (cone.color == ConeColor::BLUE) ? 1.0f : 0.0f;
+        markers->markers.push_back(cone_template);
 
-        visualization_msgs::msg::Marker t;
-        t.header = msg->header;
-        t.ns = "distance_labels";
-        t.id = id_counter++;
-        t.type = visualization_msgs::msg::Marker::TEXT_VIEW_FACING;
-        t.action = visualization_msgs::msg::Marker::ADD;
-        t.lifetime = rclcpp::Duration::from_seconds(0.1);
-        t.pose.position.x = cone.x;
-        t.pose.position.y = cone.y;
-        t.pose.position.z = cone.z + cone.height + 0.25;
-        t.scale.z = 0.15; 
-        t.color.a = 1.0; t.color.r = 1.0; t.color.g = 1.0; t.color.b = 1.0;
+        // --- Marker Distance ---
+        text_template.id = id_counter++;
+        text_template.pose.position.x = cone.x;
+        text_template.pose.position.y = cone.y;
+        text_template.pose.position.z = cone.z + cone.height + 0.25;
         
-        std::stringstream ss;
-        ss << std::fixed << std::setprecision(2) << cone.range << "m";
-        t.text = ss.str();
-        markers->markers.push_back(t);
+        char dist_str[10];
+        snprintf(dist_str, sizeof(dist_str), "%.2fm", cone.range);
+        text_template.text = dist_str;
+        markers->markers.push_back(text_template);
 
         PointT p_out;
         p_out.x = cone.x; p_out.y = cone.y; p_out.z = cone.z;
         p_out.intensity = cone.range; 
         cones_cloud_out.push_back(p_out);
 
-        if (cone.cloud) {
+        
+        if (cone.cloud && !cone.cloud->empty()) {
             cone_points_out += *cone.cloud;
         }
     }
+
+    // 5. Pubblicazione
     pub_markers_->publish(std::move(markers));
 
+    // Pubblicazione Nuvola Centroidi
     auto cones_msg = std::make_unique<sensor_msgs::msg::PointCloud2>();
     pcl::toROSMsg(cones_cloud_out, *cones_msg);
-    cones_msg->header = msg->header; // Explicit timestamp inheritance
+    cones_msg->header = msg->header;
     pub_cones_->publish(std::move(cones_msg));
 
+    // Pubblicazione Nuvola Punti Completi
     auto cone_points_msg = std::make_unique<sensor_msgs::msg::PointCloud2>();
     pcl::toROSMsg(cone_points_out, *cone_points_msg);
-    cone_points_msg->header = msg->header; // Explicit timestamp inheritance
+    cone_points_msg->header = msg->header;
     pub_cone_points_->publish(std::move(cone_points_msg));
 
     if (profiler_) {
         profiler_->endFrame(final_cones.size());
 
-        if (frame_counter_ % 50 == 0) {
+        if (frame_counter_ % 1 == 0) {
             auto total_ms = profiler_->getLastFrameTotalMs();
             RCLCPP_INFO(this->get_logger(), "Frame: %d | Latency: %.2f ms | Cones Detected: %zu", 
                 frame_counter_, total_ms, final_cones.size());
-            
-            if (total_ms > 50.0) {
-                RCLCPP_WARN(this->get_logger(), "Performance Violation: Frame latency (%.2f ms) exceeds 20Hz real-time budget.", total_ms);
+            if (total_ms > 20.0) {
+                RCLCPP_WARN(this->get_logger(), "Performance Violation: Frame latency (%.2f ms) exceeds 20ms real-time budget.", total_ms);
             }
         }
     }
@@ -617,5 +694,6 @@ int main(int argc, char **argv) {
     auto node = std::make_shared<lidar_perception::PerceptionNode>();
     rclcpp::spin(node);
     rclcpp::shutdown();
+
     return 0;
 }

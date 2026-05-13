@@ -24,7 +24,7 @@ void ClusterLogger::saveToCSV(const std::string& filepath) {
     }
 
     // CSV Header
-    out << "frame_id,cluster_id,point_count,x,y,z,range,bearing,height,width_max,width_min,aspect_ratio,avg_intensity,linearity,planarity,scattering,verticality,symmetry\n";
+    out << "frame_id,cluster_id,point_count,x,y,z,range,bearing,height,width_max,width_min,aspect_ratio,avg_intensity,linearity,planarity,scattering,verticality,symmetry,confidence,rejection_reason\n";
 
     // Data rows
     for (const auto& f : data_) {
@@ -46,7 +46,9 @@ void ClusterLogger::saveToCSV(const std::string& filepath) {
             << f.planarity << ","
             << f.scattering << ","
             << f.verticality << ","
-            << f.symmetry << "\n";
+            << f.symmetry << ","
+            << f.confidence << ","
+            << f.rejection_reason << "\n";
     }
 
     out.close();

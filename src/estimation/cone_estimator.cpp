@@ -36,6 +36,7 @@ Cone ConeEstimator::estimate(const PointCloudPtr& cluster) {
     float w = std::max(max_pt.x - min_pt.x, max_pt.y - min_pt.y);
 
     if (h < config_.min_height * 0.8f || h > config_.max_height * 1.2f || w > config_.max_width * 1.5f) {
+        cone.features.rejection_reason = "EARLY_AABB";
         return cone;
     }
 
@@ -56,7 +57,7 @@ Cone ConeEstimator::estimate(const PointCloudPtr& cluster) {
     // Dynamic point count threshold - Adjusted for 2.0cm Voxel Grid and 40-channel LiDAR
     // At 10m, 5 points are enough. At 2m, we cap at 60 points (physical limit of 2.0cm voxels on a cone)
     int expected_min_points = std::max(3, static_cast<int>(config_.min_points_at_10m * (100.0f / (r*r)))); 
-    expected_min_points = std::min(20, expected_min_points); // CAP at 60 due to 2cm voxelization and 40 channels
+    expected_min_points = std::min(60, expected_min_points); // CAP at 60 due to 2cm voxelization and 40 channels
     
     // Soft-Pass Logic: If the shape is exceptionally vertical and symmetric, 
     // allow a 15% deficit in point count.
@@ -64,18 +65,27 @@ Cone ConeEstimator::estimate(const PointCloudPtr& cluster) {
     bool high_quality_shape = (features.verticality > 0.85f && features.symmetry < 1.5f);
 
     if (point_pass_ratio < 0.85f && !high_quality_shape) {
+        cone.features.rejection_reason = "POINT_COUNT";
         return cone;
     }
 
     // PCA Features (Shape) - Relaxed thresholds for better stability
-    if (features.linearity > (config_.max_linearity + 0.05f) || 
-        features.planarity > (config_.max_planarity + 0.05f) || 
-        features.scattering < (config_.min_scatter * 0.5f)) {
+    if (features.linearity > (config_.max_linearity)) {
+        cone.features.rejection_reason = "PCA_LINEARITY";
+        return cone;
+    }
+    if (features.planarity > (config_.max_planarity + 0.1f)) {
+        cone.features.rejection_reason = "PCA_PLANARITY";
+        return cone;
+    }
+    if (features.scattering < (config_.min_scatter * 0.3f)) {
+        cone.features.rejection_reason = "PCA_SCATTER";
         return cone;
     }
  
     // Verticality Check
-    if (features.verticality < 0.65f) { 
+    if (features.verticality < config_.min_verticality) { 
+        cone.features.rejection_reason = "VERTICALITY";
         return cone;
     }
 
@@ -83,17 +93,29 @@ Cone ConeEstimator::estimate(const PointCloudPtr& cluster) {
     float dynamic_min_width = config_.base_min_width - (r * config_.dynamic_width_decay);
     dynamic_min_width = std::max(0.02f, dynamic_min_width); 
 
-    if (features.height < config_.min_height || features.height > config_.max_height) return cone;
-    if (features.width_max < dynamic_min_width || features.width_max > config_.max_width) return cone;
-    if (features.aspect_ratio < config_.min_aspect_ratio || features.aspect_ratio > config_.max_aspect_ratio) return cone;
+    if (features.height < config_.min_height || features.height > config_.max_height) {
+        cone.features.rejection_reason = "HEIGHT_LIMIT";
+        return cone;
+    }
+    if (features.width_max < dynamic_min_width || features.width_max > config_.max_width) {
+        cone.features.rejection_reason = "WIDTH_LIMIT";
+        return cone;
+    }
+    if (features.aspect_ratio < config_.min_aspect_ratio || features.aspect_ratio > config_.max_aspect_ratio) {
+        cone.features.rejection_reason = "ASPECT_RATIO";
+        return cone;
+    }
 
     // Symmetry check
     if (features.symmetry > config_.max_width_diff_ratio) {
+        cone.features.rejection_reason = "SYMMETRY";
         return cone;
     }
 
     // Candidate accepted as a cone
     cone.confidence = 1.0f;
+    cone.features.confidence = 1.0f;
+    cone.features.rejection_reason = "NONE";
     cone.color = ConeColor::BLUE;
     
     return cone;
@@ -154,7 +176,15 @@ ClusterFeatures ConeEstimator::extractFeatures(const PointCloudPtr& cluster) {
     PointT min_pt, max_pt;
     pcl::getMinMax3D(*cluster, min_pt, max_pt);
     
-    f.height = max_pt.z - config_.ground_z_level; 
+    // Robust Height: The difference between the highest and lowest point in the cluster.
+    // This is the 'visible' height.
+    f.height = max_pt.z - min_pt.z; 
+    
+    // Also track the 'absolute' height from the expected ground level
+    float absolute_height = max_pt.z - config_.ground_z_level;
+    
+    // If the visible height is much smaller than the absolute height, 
+    // it confirms the ground remover clipped the base.
     f.z = min_pt.z;
 
     float w_x = max_pt.x - min_pt.x;

@@ -76,6 +76,8 @@ namespace lidar_perception {
         float scattering = 0.0f;
         float verticality = 0.0f;
         float symmetry = 0.0f; 
+        float confidence = 0.0f;
+        std::string rejection_reason = "NONE";
     };
 
     /**

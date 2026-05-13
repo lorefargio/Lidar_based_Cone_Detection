@@ -89,6 +89,12 @@ private:
      */
     void preProcess(PointCloudPtr cloud);
 
+    /**
+     * @brief Saves the current node configuration to a JSON file.
+     * @param filepath Path to the output JSON file.
+     */
+    void saveConfig(const std::string& filepath);
+
     // ROS 2 communication interfaces
     rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr sub_lidar_; ///< LiDAR point cloud subscriber.
     rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr sub_imu_;          ///< IMU subscriber for deskewing.
@@ -112,6 +118,7 @@ private:
     std::unique_ptr<ClusterLogger> cluster_logger_; ///< Offline feature analysis logger.
     std::string json_file_path_;                    ///< Destination path for profiling reports.
     std::string csv_file_path_;                     ///< Destination path for cluster logs.
+    std::string config_json_file_path_;             ///< Destination path for configuration log.
     int frame_counter_ = 0;                         ///< Incremental frame index.
 };
 

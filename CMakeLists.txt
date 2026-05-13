@@ -17,8 +17,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
   add_compile_options(
     -Wall -Wextra -Wpedantic
-    -O3
-    -march=x86-64   
+    -O3   
     -DNDEBUG
   )
 endif()

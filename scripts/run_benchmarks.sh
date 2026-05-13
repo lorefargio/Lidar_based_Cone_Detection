@@ -39,7 +39,7 @@ echo -e "\n>>> PHASE 1: Testing Clustering Algorithms (Ground: patchworkpp)"
 for ALGO in "${CLUSTERING_ALGOS[@]}"; do
     echo -e "\nProcessing Clustering: \e[1;34m$ALGO\e[0m"
 
-    setsid ros2 run fs_lidar_perception $NODE_NAME --ros-args \
+    setsid ros2 run lidar_perception $NODE_NAME --ros-args \
         -p clustering_algorithm:=$ALGO \
         -p ground_remover_type:=patchworkpp \
         -p bag_path:="$ROSBAG_PATH" &
@@ -66,7 +66,7 @@ for GR_ALGO in "${GROUND_ALGOS[@]}"; do
 
     echo -e "\nProcessing Ground Removal: \e[1;32m$GR_ALGO\e[0m"
     
-    setsid ros2 run fs_lidar_perception $NODE_NAME --ros-args \
+    setsid ros2 run lidar_perception $NODE_NAME --ros-args \
         -p clustering_algorithm:=grid \
         -p ground_remover_type:=$GR_ALGO \
         -p bag_path:="$ROSBAG_PATH" &
