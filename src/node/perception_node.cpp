@@ -565,15 +565,15 @@ void PerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPtr msg
      */
     {
         std::lock_guard<std::mutex> lock(viz_mutex_);
-        next_viz_data_ = std::make_unique<VizData>();
-        next_viz_data_->header = msg->header;
+        auto viz_data = std::make_unique<VizData>();
+        viz_data->header = msg->header;
         
         // Data snapshots to avoid race conditions
-        next_viz_data_->cloud_viz.reset(new PointCloud(*processing_cloud));
-        next_viz_data_->cones_cloud.reset(new PointCloud);
-        next_viz_data_->cones_cloud->reserve(final_cones.size());
-        next_viz_data_->cone_points.reset(new PointCloud);
-        next_viz_data_->cone_points->reserve(final_cones.size() * 30);
+        viz_data->cloud_viz.reset(new PointCloud(*processing_cloud));
+        viz_data->cones_cloud.reset(new PointCloud);
+        viz_data->cones_cloud->reserve(final_cones.size());
+        viz_data->cone_points.reset(new PointCloud);
+        viz_data->cone_points->reserve(final_cones.size() * 30);
         
         // Marker generation
         auto markers = std::make_unique<visualization_msgs::msg::MarkerArray>();
@@ -638,13 +638,17 @@ void PerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPtr msg
             PointT p_out;
             p_out.x = cone.x; p_out.y = cone.y; p_out.z = cone.z;
             p_out.intensity = cone.range; // Carry radial range as per fusion_integration.md
-            next_viz_data_->cones_cloud->push_back(p_out);
+            viz_data->cones_cloud->push_back(p_out);
             
             if (cone.cloud) {
-                *(next_viz_data_->cone_points) += *cone.cloud;
+                *(viz_data->cone_points) += *cone.cloud;
             }
         }
-        next_viz_data_->markers = std::move(markers);
+        viz_data->markers = std::move(markers);
+        viz_queue_.push_back(std::move(viz_data));
+        
+        // Safety cap to prevent memory leak if publishers are stuck
+        if (viz_queue_.size() > 100) viz_queue_.pop_front();
     }
     viz_cv_.notify_one();
 
@@ -667,11 +671,14 @@ void PerceptionNode::visualizationWorker() {
         std::unique_ptr<VizData> data;
         {
             std::unique_lock<std::mutex> lock(viz_mutex_);
-            viz_cv_.wait(lock, [this] { return next_viz_data_ || stop_viz_thread_; });
+            viz_cv_.wait(lock, [this] { return !viz_queue_.empty() || stop_viz_thread_; });
             
-            if (stop_viz_thread_) break;
+            if (stop_viz_thread_ && viz_queue_.empty()) break;
             
-            data = std::move(next_viz_data_);
+            if (!viz_queue_.empty()) {
+                data = std::move(viz_queue_.front());
+                viz_queue_.pop_front();
+            }
         }
 
         if (!data) continue;

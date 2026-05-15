@@ -15,6 +15,7 @@
 #include <thread>
 #include <mutex>
 #include <condition_variable>
+#include <deque>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <sensor_msgs/msg/imu.hpp>
 #include <visualization_msgs/msg/marker_array.hpp>
@@ -128,7 +129,7 @@ private:
         PointCloudPtr cone_points;
         std::unique_ptr<visualization_msgs::msg::MarkerArray> markers;
     };
-    std::unique_ptr<VizData> next_viz_data_;
+    std::deque<std::unique_ptr<VizData>> viz_queue_;
     std::thread viz_thread_;
     std::mutex viz_mutex_;
     std::condition_variable viz_cv_;
