@@ -63,7 +63,7 @@ def generate_launch_description():
     pca_scat_arg = DeclareLaunchArgument('pca_min_scatter', default_value='0.02')
     pca_vert_arg = DeclareLaunchArgument('pca_min_verticality', default_value='0.65')
     rule_min_h_arg = DeclareLaunchArgument('rule_min_height', default_value='0.10')
-    rule_max_h_arg = DeclareLaunchArgument('rule_max_height', default_value='0.50')
+    rule_max_h_arg = DeclareLaunchArgument('rule_max_height', default_value='0.70')
     rule_min_w_arg = DeclareLaunchArgument('rule_base_min_width', default_value='0.10')
     rule_max_w_arg = DeclareLaunchArgument('rule_max_width', default_value='0.36')
     rule_decay_arg = DeclareLaunchArgument('rule_dynamic_width_decay', default_value='0.005')
@@ -156,23 +156,23 @@ def generate_launch_description():
     )
 
 
-    # Foxglove Bridge Node (allows Foxglove Studio to connect via WebSockets)
-    # foxglove_node = Node(
-    #     package='foxglove_bridge',
-    #     executable='foxglove_bridge',
-    #     name='foxglove_bridge',
-    #     output='screen',
-    #     parameters=[{
-    #         'port': 8765,
-    #         'address': '0.0.0.0',
-    #         'tls': False,
-    #         'topic_whitelist': ['/perception/.*', '/lidar_points',],
-    #         'send_buffer_limit': 100000000,
-    #         'use_compression': False, # Disable compression to save CPU on heavy clouds
-    #         'max_update_ms': 20,
-    #         'min_qos_depth': 1,
-    #     }]
-    # )
+    #Foxglove Bridge Node (allows Foxglove Studio to connect via WebSockets)
+    foxglove_node = Node(
+        package='foxglove_bridge',
+        executable='foxglove_bridge',
+        name='foxglove_bridge',
+        output='screen',
+        parameters=[{
+            'port': 8765,
+            'address': '0.0.0.0',
+            'tls': False,
+            'topic_whitelist': ['/perception/.*', '/lidar_points',],
+            'send_buffer_limit': 100000000,
+            'use_compression': False, # Disable compression to save CPU on heavy clouds
+            'max_update_ms': 20,
+            'min_qos_depth': 1,
+        }]
+    )
 
 
     return LaunchDescription([
@@ -235,6 +235,6 @@ def generate_launch_description():
         merge_dist_arg,
         tracking_match_dist_arg,
         perception_node,
-        #foxglove_node,
+        foxglove_node,
     ])
         
