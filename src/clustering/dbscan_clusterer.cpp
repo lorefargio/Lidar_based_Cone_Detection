@@ -14,17 +14,18 @@ void DBSCANClusterer::cluster(const PointCloudPtr& cloud, std::vector<PointCloud
     const int n_points = static_cast<int>(cloud->size());
     const float inv_eps = 1.0f / eps_;
     
-    // Discretize the environment into a constrained 3D volume for the Flat Grid optimization.
-    // The volume is set to +/- 30m XY and +/- 2m Z to focus on the immediate racing surface.
     const float range_xy = 30.0f;
     const float range_z = 2.0f;
     const int dim_xy = static_cast<int>(2.0f * range_xy * inv_eps) + 1;
     const int dim_z = static_cast<int>(2.0f * range_z * inv_eps) + 1;
+    const int grid_size = dim_xy * dim_xy * dim_z;
 
-    // "Hash-Killer" Optimization: A pre-allocated 1D vector representing the 3D grid.
-    // Mapping: Index = (x * dim_y * dim_z) + (y * dim_z) + z
-    // This provides O(1) cell access without the overhead or collisions of std::unordered_map.
-    std::vector<std::vector<int>> grid(dim_xy * dim_xy * dim_z);
+    // Initialize or resize persistent grid
+    if (grid_.size() != static_cast<size_t>(grid_size)) {
+        grid_.assign(grid_size, std::vector<int>());
+    } else {
+        for (auto& cell : grid_) cell.clear();
+    }
 
     auto get_idx = [&](float x, float y, float z) {
         int gx = static_cast<int>((x + range_xy) * inv_eps);
@@ -34,18 +35,16 @@ void DBSCANClusterer::cluster(const PointCloudPtr& cloud, std::vector<PointCloud
         return (gx * dim_xy * dim_z) + (gy * dim_z) + gz;
     };
 
-    // Phase 1: Spatial Voxelization (O(N))
     for (int i = 0; i < n_points; ++i) {
         int idx = get_idx(cloud->points[i].x, cloud->points[i].y, cloud->points[i].z);
-        if (idx != -1) grid[idx].push_back(i);
+        if (idx != -1) grid_[idx].push_back(i);
     }
 
-    std::vector<int> labels(n_points, -1); 
+    labels_.assign(n_points, -1); 
     int current_cluster_id = 0;
     std::queue<int> seed_queue;
     const float eps_sq = eps_ * eps_;
 
-    // Neighborhood Search utilizing the Flat Grid (O(1) cell lookup + 27 cell check)
     auto get_neighbors = [&](int idx, std::vector<int>& neighbors) {
         neighbors.clear();
         const auto& pt = cloud->points[idx];
@@ -61,7 +60,7 @@ void DBSCANClusterer::cluster(const PointCloudPtr& cloud, std::vector<PointCloud
                     if (z < 0 || z >= dim_z) continue;
                     
                     int g_idx = (x * dim_xy * dim_z) + (y * dim_z) + z;
-                    for (int n_idx : grid[g_idx]) {
+                    for (int n_idx : grid_[g_idx]) {
                         const auto& npt = cloud->points[n_idx];
                         float dx = pt.x - npt.x;
                         float dy = pt.y - npt.y;
@@ -75,24 +74,22 @@ void DBSCANClusterer::cluster(const PointCloudPtr& cloud, std::vector<PointCloud
         }
     };
 
-    std::vector<int> neighbor_indices;
-    neighbor_indices.reserve(200);
+    neighbor_indices_.reserve(200);
 
-    // Phase 2: Core DBSCAN Expansion
     for (int i = 0; i < n_points; ++i) {
-        if (labels[i] != -1) continue;
+        if (labels_[i] != -1) continue;
 
-        get_neighbors(i, neighbor_indices);
+        get_neighbors(i, neighbor_indices_);
 
-        if (static_cast<int>(neighbor_indices.size()) < min_pts_) {
-            labels[i] = -2; // Outlier classification
+        if (static_cast<int>(neighbor_indices_.size()) < min_pts_) {
+            labels_[i] = -2; 
             continue;
         }
 
-        labels[i] = current_cluster_id;
-        for (int n_idx : neighbor_indices) {
-            if (labels[n_idx] < 0) {
-                labels[n_idx] = current_cluster_id;
+        labels_[i] = current_cluster_id;
+        for (int n_idx : neighbor_indices_) {
+            if (labels_[n_idx] < 0) {
+                labels_[n_idx] = current_cluster_id;
                 seed_queue.push(n_idx);
             }
         }
@@ -106,8 +103,8 @@ void DBSCANClusterer::cluster(const PointCloudPtr& cloud, std::vector<PointCloud
 
             if (static_cast<int>(curr_neighbors.size()) >= min_pts_) {
                 for (int n_idx : curr_neighbors) {
-                    if (labels[n_idx] < 0) {
-                        labels[n_idx] = current_cluster_id;
+                    if (labels_[n_idx] < 0) {
+                        labels_[n_idx] = current_cluster_id;
                         seed_queue.push(n_idx);
                     }
                 }
@@ -116,11 +113,10 @@ void DBSCANClusterer::cluster(const PointCloudPtr& cloud, std::vector<PointCloud
         current_cluster_id++;
     }
 
-    // Phase 3: Cluster Extraction and Filtering
     std::vector<PointCloudPtr> temp_clusters(current_cluster_id);
     for (int i = 0; i < current_cluster_id; ++i) temp_clusters[i].reset(new PointCloud);
     for (int i = 0; i < n_points; ++i) {
-        if (labels[i] >= 0) temp_clusters[labels[i]]->push_back(cloud->points[i]);
+        if (labels_[i] >= 0) temp_clusters[labels_[i]]->push_back(cloud->points[i]);
     }
 
     for (auto& c : temp_clusters) {

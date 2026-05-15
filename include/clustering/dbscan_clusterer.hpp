@@ -45,6 +45,11 @@ private:
     int min_pts_;             ///< Minimum neighbors required for a core point.
     int min_cluster_size_;    ///< Minimum size filter for clusters.
     int max_cluster_size_;    ///< Maximum size filter for clusters.
+
+    // Persistent buffers to avoid per-frame allocations
+    std::vector<std::vector<int>> grid_;
+    std::vector<int> neighbor_indices_;
+    std::vector<int> labels_;
 };
 
 } // namespace lidar_perception

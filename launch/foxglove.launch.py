@@ -13,9 +13,9 @@ def generate_launch_description():
     estimator_type_arg = DeclareLaunchArgument('estimator_type', default_value='rule_based')
     
     # --- 2. COMMON GEOMETRIC PARAMETERS ---
-    sensor_z_arg = DeclareLaunchArgument('sensor_z', default_value='-0.50', description='Lidar height from ground')
+    sensor_z_arg = DeclareLaunchArgument('sensor_z', default_value='-0.52', description='Lidar height from ground')
     max_range_arg = DeclareLaunchArgument('max_range', default_value='25.0', description='Max processing range')
-    min_cluster_arg = DeclareLaunchArgument('min_cluster_size', default_value='3', description='Min points per cluster')
+    min_cluster_arg = DeclareLaunchArgument('min_cluster_size', default_value='2', description='Min points per cluster')
     max_cluster_arg = DeclareLaunchArgument('max_cluster_size', default_value='300', description='Max points per cluster')
 
     # --- 3. GROUND REMOVAL PARAMETERS ---
@@ -30,11 +30,11 @@ def generate_launch_description():
     slope_init_thr_arg = DeclareLaunchArgument('slope_initial_threshold', default_value='0.05')
     slope_seg_arg = DeclareLaunchArgument('slope_segments', default_value='360')
     # Patchwork++
-    pw_iter_arg = DeclareLaunchArgument('pw_num_iter', default_value='6')
-    pw_dist_arg = DeclareLaunchArgument('pw_th_dist', default_value='0.01')
-    pw_seeds_arg = DeclareLaunchArgument('pw_th_seeds', default_value='0.01')
-    pw_dist_v_arg = DeclareLaunchArgument('pw_th_dist_v', default_value='0.01')
-    pw_seeds_v_arg = DeclareLaunchArgument('pw_th_seeds_v', default_value='0.01')
+    pw_iter_arg = DeclareLaunchArgument('pw_num_iter', default_value='3')
+    pw_dist_arg = DeclareLaunchArgument('pw_th_dist', default_value='0.02')
+    pw_seeds_arg = DeclareLaunchArgument('pw_th_seeds', default_value='0.02')
+    pw_dist_v_arg = DeclareLaunchArgument('pw_th_dist_v', default_value='0.1')
+    pw_seeds_v_arg = DeclareLaunchArgument('pw_th_seeds_v', default_value='0.02')
     pw_min_r_arg = DeclareLaunchArgument('pw_min_range', default_value='0.5')
     pw_upright_arg = DeclareLaunchArgument('pw_uprightness_thr', default_value='0.707')
     pw_rnr_arg = DeclareLaunchArgument('pw_enable_RNR', default_value='true')
@@ -58,7 +58,7 @@ def generate_launch_description():
     depth_rings_arg = DeclareLaunchArgument('depth_num_rings', default_value='32')
 
     # --- 5. ESTIMATION PARAMETERS (Strictness Control) ---
-    pca_lin_arg = DeclareLaunchArgument('pca_max_linearity', default_value='0.9')
+    pca_lin_arg = DeclareLaunchArgument('pca_max_linearity', default_value='0.8')
     pca_plan_arg = DeclareLaunchArgument('pca_max_planarity', default_value='0.8')
     pca_scat_arg = DeclareLaunchArgument('pca_min_scatter', default_value='0.02')
     pca_vert_arg = DeclareLaunchArgument('pca_min_verticality', default_value='0.65')
@@ -66,23 +66,26 @@ def generate_launch_description():
     rule_max_h_arg = DeclareLaunchArgument('rule_max_height', default_value='0.50')
     rule_min_w_arg = DeclareLaunchArgument('rule_base_min_width', default_value='0.10')
     rule_max_w_arg = DeclareLaunchArgument('rule_max_width', default_value='0.36')
-    rule_decay_arg = DeclareLaunchArgument('rule_dynamic_width_decay', default_value='0.001')
-    rule_pts_arg = DeclareLaunchArgument('rule_min_points_at_10m', default_value='4')
+    rule_decay_arg = DeclareLaunchArgument('rule_dynamic_width_decay', default_value='0.005')
+    rule_pts_arg = DeclareLaunchArgument('rule_min_points_at_10m', default_value='5')
+    rule_pts_cap_arg = DeclareLaunchArgument('rule_min_points_cap', default_value='60')
     rule_int_arg = DeclareLaunchArgument('rule_min_intensity', default_value='5.0')
 
-    # --- 6. DESKEWING & PRE-FILTERS ---
+    # --- 6. POST-PROCESSING & DESKEWING ---
+    merge_dist_arg = DeclareLaunchArgument('merge_dist', default_value='0.25')
+    tracking_match_dist_arg = DeclareLaunchArgument('tracking_match_dist', default_value='0.45')
     use_deskew_arg = DeclareLaunchArgument('use_deskewing', default_value='false')
     imu_topic_arg = DeclareLaunchArgument('imu_topic', default_value='/zed/zed_node/imu/data')
     deskew_trans_arg = DeclareLaunchArgument('deskew_use_translation', default_value='true')
     static_imu_to_lidar_xyz_arg = DeclareLaunchArgument('static_imu_to_lidar_xyz', default_value='[-0.037, 0.0335, 0.053]')
     use_vox_filt_arg = DeclareLaunchArgument('use_voxel_filter', default_value='false')
-    vox_size_arg = DeclareLaunchArgument('voxel_size', default_value='0.05')
+    vox_size_arg = DeclareLaunchArgument('voxel_size', default_value='0.02')
 
     # --- 7. LOGGING & DEBUG ---
     log_dir_arg = DeclareLaunchArgument('log_dir', default_value='log_profiler/')
     log_clusters_arg = DeclareLaunchArgument('log_clusters', default_value='true')
     log_all_clusters_arg = DeclareLaunchArgument('log_all_clusters', default_value='false', description='Log all clusters for recall analysis')
-    debug_freq_arg = DeclareLaunchArgument('debug_pub_freq', default_value='1')
+    debug_freq_arg = DeclareLaunchArgument('debug_pub_freq', default_value='10')
 
     # Our perception node
     perception_node = Node(
@@ -135,7 +138,10 @@ def generate_launch_description():
             'rule_max_width': LaunchConfiguration('rule_max_width'),
             'rule_dynamic_width_decay': LaunchConfiguration('rule_dynamic_width_decay'),
             'rule_min_points_at_10m': LaunchConfiguration('rule_min_points_at_10m'),
+            'rule_min_points_cap': LaunchConfiguration('rule_min_points_cap'),
             'rule_min_intensity': LaunchConfiguration('rule_min_intensity'),
+            'merge_dist': LaunchConfiguration('merge_dist'),
+            'tracking_match_dist': LaunchConfiguration('tracking_match_dist'),
             'use_deskewing': LaunchConfiguration('use_deskewing'),
             'imu_topic': LaunchConfiguration('imu_topic'),
             'deskew_use_translation': LaunchConfiguration('deskew_use_translation'),
@@ -151,31 +157,23 @@ def generate_launch_description():
 
 
     # Foxglove Bridge Node (allows Foxglove Studio to connect via WebSockets)
-    foxglove_node = Node(
-        package='foxglove_bridge',
-        executable='foxglove_bridge',
-        name='foxglove_bridge',
-        output='screen',
-        parameters=[{
-            'port': 8765,
-            'address': '0.0.0.0',
-            'tls': False,
-            'topic_whitelist': ['/perception/.*','/zed/zed_node/left/image_rect_color', '/tf', '/tf_static', '/rosout', '/lidar_points', '/zed/zed_node/rgb/color/rect/image'],
-            'send_buffer_limit': 100000000,
-            'use_compression': True,
-            'max_update_ms': 10,
-            'min_qos_depth': 1,
-        }]
-    )
+    # foxglove_node = Node(
+    #     package='foxglove_bridge',
+    #     executable='foxglove_bridge',
+    #     name='foxglove_bridge',
+    #     output='screen',
+    #     parameters=[{
+    #         'port': 8765,
+    #         'address': '0.0.0.0',
+    #         'tls': False,
+    #         'topic_whitelist': ['/perception/.*', '/lidar_points',],
+    #         'send_buffer_limit': 100000000,
+    #         'use_compression': False, # Disable compression to save CPU on heavy clouds
+    #         'max_update_ms': 20,
+    #         'min_qos_depth': 1,
+    #     }]
+    # )
 
-    # Execute a ros2 bag play command if a bag path was provided
-    play_bag = ExecuteProcess(
-        condition=IfCondition(
-            PythonExpression(["'", LaunchConfiguration('bag'), "' != ''"])
-        ),
-        cmd=['ros2', 'bag', 'play', LaunchConfiguration('bag'), '--loop'],
-        output='screen'
-    )
 
     return LaunchDescription([
         bag_arg,
@@ -233,8 +231,10 @@ def generate_launch_description():
         log_clusters_arg,
         log_all_clusters_arg,
         debug_freq_arg,
+        rule_pts_cap_arg,
+        merge_dist_arg,
+        tracking_match_dist_arg,
         perception_node,
-        foxglove_node,
-        play_bag,
+        #foxglove_node,
     ])
         

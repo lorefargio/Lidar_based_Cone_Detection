@@ -57,6 +57,8 @@ private:
     inline int getGridIndex(int x, int y) const {
         return (x + grid_dim_/2) * grid_dim_ + (y + grid_dim_/2);
     }
+
+    std::vector<int> occupied_indices_;
 };
 
 } // namespace lidar_perception

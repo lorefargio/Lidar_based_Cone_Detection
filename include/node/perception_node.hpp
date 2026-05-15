@@ -12,6 +12,9 @@
 #pragma once
 
 #include <rclcpp/rclcpp.hpp>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <sensor_msgs/msg/imu.hpp>
 #include <visualization_msgs/msg/marker_array.hpp>
@@ -87,7 +90,15 @@ private:
      * 
      * @param cloud Pointer to the point cloud to be processed in-place.
      */
-    void preProcess(PointCloudPtr cloud);
+    void preProcess(const PointCloudPtr& cloud);
+
+    /**
+     * @brief Worker thread for asynchronous visualization publication.
+     * 
+     * Handles PCL-to-ROS conversion and publication in a background thread 
+     * to prevent blocking the real-time perception pipeline.
+     */
+    void visualizationWorker();
 
     /**
      * @brief Saves the current node configuration to a JSON file.
@@ -101,13 +112,28 @@ private:
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr pub_markers_; ///< Visualization marker publisher.
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_cones_;   ///< Object centroids publisher.
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_cone_points_; ///< Raw object points publisher.
-    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_ground_;  ///< Ground points publisher (debug).
-    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_no_ground_; ///< Obstacle points publisher (debug).
+    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_lidar_viz_;   ///< Lightweight original cloud for visualization.
 
     // Core pipeline components
     PointCloudPtr raw_cloud_ptr_{new PointCloud};      ///< Buffer for raw input cloud.
+    PointCloudPtr filtered_cloud_ptr_{new PointCloud}; ///< Buffer for early-voxelized cloud.
     PointCloudPtr obstacles_str_{new PointCloud};      ///< Buffer for non-ground points.
     PointCloudPtr ground_str_{new PointCloud};         ///< Buffer for ground points.
+
+    // Asynchronous Visualization Logic
+    struct VizData {
+        std_msgs::msg::Header header;
+        PointCloudPtr cloud_viz;
+        PointCloudPtr cones_cloud;
+        PointCloudPtr cone_points;
+        std::unique_ptr<visualization_msgs::msg::MarkerArray> markers;
+    };
+    std::unique_ptr<VizData> next_viz_data_;
+    std::thread viz_thread_;
+    std::mutex viz_mutex_;
+    std::condition_variable viz_cv_;
+    bool stop_viz_thread_ = false;
+
     std::unique_ptr<GroundRemoverInterface> ground_remover_; ///< Abstract ground removal interface.
     std::unique_ptr<ClustererInterface> clusterer_;          ///< Abstract clustering interface.
     std::unique_ptr<ConeEstimator> estimator_;               ///< Geometric object classification engine.

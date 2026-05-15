@@ -72,9 +72,9 @@ private:
                                     size_t& last_idx,
                                     Eigen::Quaternionf& orientation);
 
-    // TODO: Add TF handling if Lidar and IMU are not aligned.
-    // For now, we assume the IMU data is already in or can be easily mapped to the Lidar frame
-    // or we only care about the relative rotation during the sweep.
+    // Persistent buffers to avoid per-frame allocations
+    std::vector<LidarOrientations> local_buffer_;
+    std::vector<Eigen::Quaternionf, Eigen::aligned_allocator<Eigen::Quaternionf>> keyframe_relative_q_;
 };
 
 } // namespace lidar_perception

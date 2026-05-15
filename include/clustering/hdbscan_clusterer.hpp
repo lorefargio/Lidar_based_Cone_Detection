@@ -39,20 +39,38 @@ private:
 
     void extract(const PointCloudPtr& cloud, const std::vector<int>& indices, std::vector<PointCloudPtr>& clusters);
 
+    // Persistent buffers
+    std::vector<float> core_distances_;
+    std::vector<int> nn_indices_;
+    std::vector<float> nn_dists_;
+    std::vector<Edge> edges_;
+    std::vector<int> labels_;
+    std::vector<bool> extracted_;
+
     struct UnionFind {
         std::vector<int> parent;
+        std::vector<int> size;
         UnionFind(int n) {
             parent.resize(n);
+            size.assign(n, 1);
             for(int i=0; i<n; ++i) parent[i] = i;
         }
         int find(int i) {
             if (parent[i] == i) return i;
             return parent[i] = find(parent[i]);
         }
-        void unite(int i, int j) {
+        // Unite returns true if merged, false if already same or should not merge
+        bool unite(int i, int j, int max_size) {
             int root_i = find(i);
             int root_j = find(j);
-            if (root_i != root_j) parent[root_i] = root_j;
+            if (root_i != root_j) {
+                if (size[root_i] + size[root_j] <= max_size) {
+                    parent[root_i] = root_j;
+                    size[root_j] += size[root_i];
+                    return true;
+                }
+            }
+            return false;
         }
     };
 };

@@ -109,7 +109,7 @@ void BinBasedGroundRemover::removeGround(const PointCloudConstPtr& cloud_in, Poi
         voxel_grid.setLeafSize(voxel_size_, voxel_size_, voxel_size_);
         PointCloudPtr filtered(new PointCloud);
         voxel_grid.filter(*filtered);
-        *cloud_obstacles = *filtered;
+        cloud_obstacles = filtered;
     }
 }
 

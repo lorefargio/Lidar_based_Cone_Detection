@@ -44,54 +44,55 @@ bool Deskewer::deskew(PointCloudPtr cloud) {
     const double sweep_end_time = cloud->points.back().timestamp;
     const double sweep_duration = sweep_end_time - sweep_start_time;
     
-    // Safety check for valid timestamps
     if (sweep_start_time < 1.0 || sweep_duration < 1e-6) return false;
 
-    // 1. Optimized Snapshot of IMU buffer (Copy only the relevant time slice)
-    std::vector<LidarOrientations> local_buffer;
+    // 1. Optimized Snapshot of IMU buffer (Reusing persistent local_buffer_)
     {
         std::lock_guard<std::mutex> lock(buffer_mutex_);
         if (imu_buffer_.size() < 2) return false;
         
-        // Ensure the entire sweep is covered by the buffer
         if (sweep_start_time < imu_buffer_.front().timestamp || sweep_end_time > imu_buffer_.back().timestamp) {
             return false;
         }
 
-        // Find relevant slice with 0.1s padding
         auto it_start = std::lower_bound(imu_buffer_.begin(), imu_buffer_.end(), sweep_start_time - 0.1,
             [](const LidarOrientations& d, double ts) { return d.timestamp < ts; });
         auto it_end = std::upper_bound(imu_buffer_.begin(), imu_buffer_.end(), sweep_end_time + 0.1,
             [](double ts, const LidarOrientations& d) { return ts < d.timestamp; });
 
-        local_buffer.assign(it_start, it_end);
+        local_buffer_.assign(it_start, it_end);
     }
 
     // 2. Pre-calculate Keyframes (O(K) where K << N points)
-    // We sample the orientation every 1ms (approx 100 samples for a 10Hz sweep)
     const int num_keyframes = static_cast<int>(sweep_duration * 1000.0) + 2; 
     const double time_step = sweep_duration / (num_keyframes - 1);
     
-    std::vector<Eigen::Quaternionf, Eigen::aligned_allocator<Eigen::Quaternionf>> keyframe_orientations(num_keyframes);
+    if (keyframe_relative_q_.size() != static_cast<size_t>(num_keyframes)) {
+        keyframe_relative_q_.resize(num_keyframes);
+    }
+    
     size_t last_search_idx = 0;
+    Eigen::Quaternionf start_orientation;
+    getInterpolatedOrientation(sweep_start_time, local_buffer_, last_search_idx, start_orientation);
+    const Eigen::Quaternionf start_orientation_inv = start_orientation.inverse();
 
     for (int i = 0; i < num_keyframes; ++i) {
         double t = sweep_start_time + i * time_step;
-        getInterpolatedOrientation(t, local_buffer, last_search_idx, keyframe_orientations[i]);
+        Eigen::Quaternionf q_curr;
+        getInterpolatedOrientation(t, local_buffer_, last_search_idx, q_curr);
+        keyframe_relative_q_[i] = start_orientation_inv * q_curr;
     }
 
-    const Eigen::Quaternionf start_orientation_inv = keyframe_orientations[0].inverse();
     const Eigen::Vector3f lever_arm = config_.static_imu_to_lidar;
     const bool use_translation = config_.use_translation && lever_arm.norm() > 0.001f;
 
-    // 3. Massively Parallel Deskewing (O(N) with OpenMP and SIMD)
+    // 3. Massively Parallel Deskewing (O(N))
     const int n_points = static_cast<int>(cloud->points.size());
 
     #pragma omp parallel for schedule(static)
     for (int i = 0; i < n_points; ++i) {
         auto& point = cloud->points[i];
         
-        // Fast Index Mapping (O(1) instead of binary search)
         double relative_t = point.timestamp - sweep_start_time;
         int k_idx = static_cast<int>(relative_t / time_step);
         k_idx = std::clamp(k_idx, 0, num_keyframes - 2);
@@ -99,20 +100,14 @@ bool Deskewer::deskew(PointCloudPtr cloud) {
         float alpha = static_cast<float>((relative_t - k_idx * time_step) / time_step);
         alpha = std::clamp(alpha, 0.0f, 1.0f);
 
-        // Fast NLERP (Interpolation of coefficients + Normalization)
-        // Order of magnitude faster than SLERP and visually indistinguishable for small steps.
-        Eigen::Quaternionf current_q;
-        current_q.coeffs() = keyframe_orientations[k_idx].coeffs() * (1.0f - alpha) + 
-                             keyframe_orientations[k_idx+1].coeffs() * alpha;
-        current_q.normalize();
+        // NLERP on relative quaternions directly
+        Eigen::Quaternionf relative_q;
+        relative_q.coeffs() = keyframe_relative_q_[k_idx].coeffs() * (1.0f - alpha) + 
+                             keyframe_relative_q_[k_idx+1].coeffs() * alpha;
+        relative_q.normalize();
 
-        // Transformation Application: p_corrected = R_relative * p
-        // R_relative = q_start_inv * q_curr
-        Eigen::Quaternionf relative_q = start_orientation_inv * current_q;
         Eigen::Vector3f p(point.x, point.y, point.z);
-
         if (use_translation) {
-            // Simplified Lever Arm Correction: p_corrected = R_rel * (p + lever) - lever
             Eigen::Vector3f p_corrected = relative_q * (p + lever_arm) - lever_arm;
             point.x = p_corrected.x(); point.y = p_corrected.y(); point.z = p_corrected.z();
         } else {
@@ -130,29 +125,30 @@ bool Deskewer::getInterpolatedOrientation(double timestamp,
                                           Eigen::Quaternionf& orientation) {
     if (buffer.size() < 2) return false;
 
-    // Linear monotonic search starting from last_idx
     size_t i = last_idx;
     while (i + 1 < buffer.size() && buffer[i + 1].timestamp < timestamp) {
         i++;
     }
     last_idx = i;
 
-    // Ensure timestamp is within the found interval
     if (i + 1 >= buffer.size() || buffer[i].timestamp > timestamp || buffer[i+1].timestamp < timestamp) {
-        // Fallback to binary search if monotonic search fails (e.g. non-ordered points)
         auto it = std::lower_bound(buffer.begin(), buffer.end(), timestamp,
             [](const LidarOrientations& data, double ts) {
                 return data.timestamp < ts;
             });
-        if (it == buffer.begin() || it == buffer.end()) return false;
-        i = std::distance(buffer.begin(), it) - 1;
+        if (it == buffer.begin()) i = 0;
+        else if (it == buffer.end()) i = buffer.size() - 2;
+        else i = std::distance(buffer.begin(), it) - 1;
     }
 
     const auto& b = buffer[i];
     const auto& a = buffer[i+1];
 
     double dt = a.timestamp - b.timestamp;
-    if (dt < 1e-9) return false; 
+    if (dt < 1e-9) {
+        orientation = b.orientation;
+        return true;
+    }
     
     double alpha = (timestamp - b.timestamp) / dt;
     orientation = b.orientation.slerp(static_cast<float>(alpha), a.orientation);

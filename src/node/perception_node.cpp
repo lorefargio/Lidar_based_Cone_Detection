@@ -40,9 +40,9 @@ PerceptionNode::PerceptionNode() : Node("lidar_perception_node") {
     this->declare_parameter<bool>("log_all_clusters", false);
     
     // Common geometric/filtering parameters
-    this->declare_parameter<double>("sensor_z", -0.50);
+    this->declare_parameter<double>("sensor_z", -0.52);
     this->declare_parameter<double>("max_range", 25.0);
-    this->declare_parameter<int>("min_cluster_size", 3);
+    this->declare_parameter<int>("min_cluster_size", 2);
     this->declare_parameter<int>("max_cluster_size", 300);
     
     std::string bag_path = this->get_parameter("bag_path").as_string();
@@ -189,6 +189,7 @@ PerceptionNode::PerceptionNode() : Node("lidar_perception_node") {
     this->declare_parameter<double>("rule_max_width", 0.36);
     this->declare_parameter<double>("rule_dynamic_width_decay", 0.005);
     this->declare_parameter<int>("rule_min_points_at_10m", 5);
+    this->declare_parameter<int>("rule_min_points_cap", 60);
     this->declare_parameter<double>("rule_min_intensity", 5.0);
 
     est_cfg.min_height = static_cast<float>(this->get_parameter("rule_min_height").as_double());
@@ -197,6 +198,7 @@ PerceptionNode::PerceptionNode() : Node("lidar_perception_node") {
     est_cfg.max_width = static_cast<float>(this->get_parameter("rule_max_width").as_double());
     est_cfg.dynamic_width_decay = static_cast<float>(this->get_parameter("rule_dynamic_width_decay").as_double());
     est_cfg.min_points_at_10m = this->get_parameter("rule_min_points_at_10m").as_int();
+    est_cfg.min_points_cap = this->get_parameter("rule_min_points_cap").as_int();
     est_cfg.min_intensity = static_cast<float>(this->get_parameter("rule_min_intensity").as_double());
     est_cfg.max_linearity = static_cast<float>(this->get_parameter("pca_max_linearity").as_double());
     est_cfg.max_planarity = static_cast<float>(this->get_parameter("pca_max_planarity").as_double());
@@ -207,7 +209,11 @@ PerceptionNode::PerceptionNode() : Node("lidar_perception_node") {
     estimator_ = std::make_unique<ConeEstimator>(est_cfg);
     RCLCPP_INFO(this->get_logger(), "Estimator: CONSOLIDATED CONE-ESTIMATOR");
 
-    // --- 5. DESKEWING CONFIGURATION ---
+    // --- 5. POST-PROCESSING & AGGREGATION ---
+    this->declare_parameter<double>("merge_dist", 0.25);
+    this->declare_parameter<double>("tracking_match_dist", 0.45);
+
+    // --- 6. DESKEWING CONFIGURATION ---
     this->declare_parameter<bool>("use_deskewing", true);
     this->declare_parameter<std::string>("imu_topic", "/zed/zed_node/imu/data");
     this->declare_parameter<bool>("deskew_use_translation", true);
@@ -260,11 +266,20 @@ PerceptionNode::PerceptionNode() : Node("lidar_perception_node") {
     pub_markers_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("/perception/cones_vis", rclcpp::SensorDataQoS());
     pub_cones_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/perception/cones", rclcpp::SensorDataQoS());
     pub_cone_points_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/perception/cone_points", rclcpp::SensorDataQoS());
-    pub_ground_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/perception/ground_debug", rclcpp::SensorDataQoS());
-    pub_no_ground_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/perception/no_ground", rclcpp::SensorDataQoS());
+    pub_lidar_viz_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/perception/lidar_viz", rclcpp::SensorDataQoS());
+
+    // Start background worker for visualization
+    viz_thread_ = std::thread(&PerceptionNode::visualizationWorker, this);
 }
 
 PerceptionNode::~PerceptionNode() {
+    {
+        std::lock_guard<std::mutex> lock(viz_mutex_);
+        stop_viz_thread_ = true;
+    }
+    viz_cv_.notify_all();
+    if (viz_thread_.joinable()) viz_thread_.join();
+
     if (profiler_) {
         profiler_->saveToJSON(json_file_path_);
         RCLCPP_INFO(this->get_logger(), "Profiling data saved to JSON before exit.");
@@ -320,6 +335,8 @@ void PerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPtr msg
      * Transformation of the incoming ROS 2 message into a PCL-compatible format.
      */
     if (profiler_) profiler_->startTimer("conversion");
+    
+    // Always use the persistent input buffer for ROS conversion
     try {
         pcl::fromROSMsg(*msg, *raw_cloud_ptr_);
     } catch (const std::exception& e) {
@@ -327,52 +344,55 @@ void PerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPtr msg
         if (profiler_) profiler_->stopTimer("conversion");
         return;
     }
-    if (profiler_) profiler_->stopTimer("conversion");
     
     if (raw_cloud_ptr_->empty()) {
         RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 5000, "Received null or empty point cloud.");
+        if (profiler_) profiler_->stopTimer("conversion");
         return;
     }
-
-    /**
-     * @phase Pre-processing
-     * Sequential execution of spatial truncation and early voxelization.
-     */
-    if (profiler_) profiler_->startTimer("conversion"); 
 
     preProcess(raw_cloud_ptr_);
 
     // --- Intensity Distance Normalization ---
-    // Objects further away return less light. We normalize to 10m to make classification stable.
-    const float REF_DIST_SQ = 10.0f * 10.0f;
+    const float REF_DIST_SQ_INV = 1.0f / (10.0f * 10.0f);
     for (auto& pt : raw_cloud_ptr_->points) {
         float r2 = pt.x*pt.x + pt.y*pt.y + pt.z*pt.z;
         if (r2 > 1.0f) {
-            pt.intensity = pt.intensity * (r2 / REF_DIST_SQ);
-            pt.intensity = std::min(255.0f, pt.intensity); // Clamp
+            float factor = r2 * REF_DIST_SQ_INV;
+            pt.intensity = std::min(255.0f, pt.intensity * factor); 
         }
     }
+
+    // Pointer to the cloud we will actually process (start with raw)
+    PointCloudPtr processing_cloud = raw_cloud_ptr_;
 
     if (raw_cloud_ptr_->size() > 500) {
         pcl::VoxelGrid<PointT> early_vg;
         early_vg.setInputCloud(raw_cloud_ptr_);
-        early_vg.setLeafSize(this->get_parameter("voxel_size").as_double(), this->get_parameter("voxel_size").as_double(), this->get_parameter("voxel_size").as_double());
-        PointCloudPtr filtered(new PointCloud);
-        early_vg.filter(*filtered);
-        *raw_cloud_ptr_ = *filtered;
-    }
+        double v_size = this->get_parameter("voxel_size").as_double();
+        early_vg.setLeafSize(v_size, v_size, v_size);
+        early_vg.filter(*filtered_cloud_ptr_);
+        
+        // Switch to the filtered cloud for the rest of the pipeline
+        processing_cloud = filtered_cloud_ptr_; 
+
+        // Publish a lightweight version for Foxglove/RViz at FULL frequency
+        auto viz_msg = std::make_unique<sensor_msgs::msg::PointCloud2>();
+        pcl::toROSMsg(*filtered_cloud_ptr_, *viz_msg);
+        viz_msg->header = msg->header;
+        pub_lidar_viz_->publish(std::move(viz_msg));
+        }
 
     if (profiler_) profiler_->stopTimer("conversion");
 
-    if (raw_cloud_ptr_->empty()) return;
+    if (processing_cloud->empty()) return;
 
     /**
      * @phase Motion Compensation
-     * Deskewing of the point cloud based on high-frequency IMU telemetry.
      */
     if (this->get_parameter("use_deskewing").as_bool() && deskewer_) {
         if (profiler_) profiler_->startTimer("deskewing");
-        if (!deskewer_->deskew(raw_cloud_ptr_)) {
+        if (!deskewer_->deskew(processing_cloud)) {
             RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000, 
                 "Deskewing operation postponed (awaiting IMU synchronization).");
         }
@@ -381,7 +401,6 @@ void PerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPtr msg
 
     /**
      * @phase Ground Removal
-     * Segmentation of the point cloud into traversable terrain and obstacle subsets.
      */
     if (!ground_remover_) return;
 
@@ -390,26 +409,9 @@ void PerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPtr msg
     obstacles_str_->clear();
     ground_str_->clear();
 
-    ground_remover_->removeGround(raw_cloud_ptr_, obstacles_str_, ground_str_);
+    ground_remover_->removeGround(processing_cloud, obstacles_str_, ground_str_);
 
     if (profiler_) profiler_->stopTimer("ground_removal");
-    
-    if (frame_counter_ % this->get_parameter("debug_pub_freq").as_int() == 0) {
-        auto no_ground_msg = std::make_unique<sensor_msgs::msg::PointCloud2>();
-        
-        // Crea una nuvola temporanea per il debug
-        PointCloudPtr display_cloud(new PointCloud);
-        
-        // Applica un filtro voxel pesante (es. 10-15cm) SOLO per la pubblicazione
-        pcl::VoxelGrid<PointT> sor;
-        sor.setInputCloud(obstacles_str_);
-        sor.setLeafSize(0.15f, 0.15f, 0.15f); // 15cm: leggerissima per la rete
-        sor.filter(*display_cloud);
-
-        pcl::toROSMsg(*display_cloud, *no_ground_msg);
-        no_ground_msg->header = msg->header;
-        pub_no_ground_->publish(std::move(no_ground_msg));
-    }
     
     /**
      * @phase Object Clustering
@@ -427,30 +429,33 @@ void PerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPtr msg
 
     /**
      * @phase Cluster Merging
-     * Proximity-based consolidation of over-segmented clusters using centroidal distance.
      */
     if (profiler_) profiler_->startTimer("merging");
     std::vector<PointCloudPtr> merged_clusters;
     
     std::vector<PointCloudPtr> valid_candidates;
+    valid_candidates.reserve(clusters.size());
+    int min_cluster = this->get_parameter("min_cluster_size").as_int();
     for (auto& c : clusters) {
-        if (c->size() >= 3) {
-            valid_candidates.push_back(c);
-        }
+        if (c->size() >= static_cast<size_t>(min_cluster)) valid_candidates.push_back(c);
     }
 
     std::vector<bool> merged_flag(valid_candidates.size(), false);
-    
-    std::vector<Eigen::Vector4f, Eigen::aligned_allocator<Eigen::Vector4f>> centroids(valid_candidates.size());
+    std::vector<Eigen::Vector3f> centroids(valid_candidates.size());
     
     for(size_t i = 0; i < valid_candidates.size(); ++i) {
-        pcl::compute3DCentroid(*valid_candidates[i], centroids[i]);
+        Eigen::Vector4f c4;
+        pcl::compute3DCentroid(*valid_candidates[i], c4);
+        centroids[i] = c4.head<3>();
     }
 
-    const float MERGE_DIST_SQ = 0.25f * 0.25f; 
+    const float merge_dist = static_cast<float>(this->get_parameter("merge_dist").as_double());
+    const float MERGE_DIST_SQ = merge_dist * merge_dist; 
     for (size_t i = 0; i < valid_candidates.size(); ++i) {
         if (merged_flag[i]) continue;
-        PointCloudPtr super_cluster(new PointCloud(*valid_candidates[i]));
+        
+        PointCloudPtr current_cloud = valid_candidates[i];
+        bool has_merged = false;
 
         for (size_t j = i + 1; j < valid_candidates.size(); ++j) {
             if (merged_flag[j]) continue;
@@ -458,11 +463,16 @@ void PerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPtr msg
             float dy = centroids[i][1] - centroids[j][1];
 
             if (dx*dx + dy*dy < MERGE_DIST_SQ) {
-                *super_cluster += *valid_candidates[j];
+                if (!has_merged) {
+                    // Only copy if we are actually merging
+                    current_cloud.reset(new PointCloud(*valid_candidates[i]));
+                    has_merged = true;
+                }
+                *current_cloud += *valid_candidates[j];
                 merged_flag[j] = true; 
             }
         }
-        merged_clusters.push_back(super_cluster);
+        merged_clusters.push_back(current_cloud);
     }
     if (profiler_) profiler_->stopTimer("merging");
 
@@ -508,7 +518,8 @@ void PerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPtr msg
      * detections and smooth the reported position.
      */
     if (profiler_) profiler_->startTimer("duplicate");
-    const float MIN_DIST_SQ = 0.45f * 0.45f; 
+    const float tracking_match_dist = static_cast<float>(this->get_parameter("tracking_match_dist").as_double());
+    const float MIN_DIST_SQ = tracking_match_dist * tracking_match_dist; 
     std::vector<Cone> final_cones;
     std::vector<bool> candidate_merged(candidate_cones.size(), false);
 
@@ -548,100 +559,94 @@ void PerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPtr msg
     if (profiler_) profiler_->stopTimer("duplicate");
 
     /**
-     * @phase Output Generation
-     * Construction and publication of visualization markers and detection messages.
-     * Uses std::unique_ptr and std::move to enable zero-copy IPC and minimize latency.
+     * @phase Asynchronous Handover
+     * Transfer processed data to the visualization worker thread and return control 
+     * to the main callback immediately.
      */
-    auto markers = std::make_unique<visualization_msgs::msg::MarkerArray>();
-    markers->markers.reserve(final_cones.size() * 2 + 2);
-
-    
-    PointCloud cones_cloud_out; 
-    PointCloud cone_points_out;
-    cones_cloud_out.reserve(final_cones.size());
-    cone_points_out.reserve(final_cones.size() * 50);
-
-    
-    visualization_msgs::msg::Marker delete_template;
-    delete_template.header = msg->header;
-    delete_template.action = visualization_msgs::msg::Marker::DELETEALL;
-    delete_template.id = 0;
-
-    delete_template.ns = "cones";
-    markers->markers.push_back(delete_template);
-    delete_template.ns = "distance_labels";
-    markers->markers.push_back(delete_template);
-
-    
-    visualization_msgs::msg::Marker cone_template;
-    cone_template.header = msg->header;
-    cone_template.ns = "cones";
-    cone_template.type = visualization_msgs::msg::Marker::CYLINDER;
-    cone_template.action = visualization_msgs::msg::Marker::ADD;
-    cone_template.lifetime = rclcpp::Duration::from_seconds(0.2);
-    cone_template.scale.x = 0.22; cone_template.scale.y = 0.22;
-    cone_template.color.a = 1.0; 
-
-    visualization_msgs::msg::Marker text_template;
-    text_template.header = msg->header;
-    text_template.ns = "distance_labels";
-    text_template.type = visualization_msgs::msg::Marker::TEXT_VIEW_FACING;
-    text_template.action = visualization_msgs::msg::Marker::ADD;
-    text_template.lifetime = rclcpp::Duration::from_seconds(0.2);
-    text_template.scale.z = 0.15;
-    text_template.color.a = 1.0; text_template.color.r = 1.0; text_template.color.g = 1.0; text_template.color.b = 1.0;
-
-    
-    int id_counter = 1;
-    for (const auto& cone : final_cones) {
-        // --- Marker Cilindro ---
-        cone_template.id = id_counter;
-        cone_template.pose.position.x = cone.x;
-        cone_template.pose.position.y = cone.y;
-        cone_template.pose.position.z = cone.z + (cone.height / 2.0) + 0.05; 
-        cone_template.scale.z = cone.height;
+    {
+        std::lock_guard<std::mutex> lock(viz_mutex_);
+        next_viz_data_ = std::make_unique<VizData>();
+        next_viz_data_->header = msg->header;
         
-        cone_template.color.r = (cone.color == ConeColor::YELLOW) ? 1.0f : 0.0f;
-        cone_template.color.g = (cone.color == ConeColor::YELLOW) ? 1.0f : 0.0f;
-        cone_template.color.b = (cone.color == ConeColor::BLUE) ? 1.0f : 0.0f;
-        markers->markers.push_back(cone_template);
-
-        // --- Marker Distance ---
-        text_template.id = id_counter++;
-        text_template.pose.position.x = cone.x;
-        text_template.pose.position.y = cone.y;
-        text_template.pose.position.z = cone.z + cone.height + 0.25;
+        // Data snapshots to avoid race conditions
+        next_viz_data_->cloud_viz.reset(new PointCloud(*processing_cloud));
+        next_viz_data_->cones_cloud.reset(new PointCloud);
+        next_viz_data_->cones_cloud->reserve(final_cones.size());
+        next_viz_data_->cone_points.reset(new PointCloud);
+        next_viz_data_->cone_points->reserve(final_cones.size() * 30);
         
-        char dist_str[10];
-        snprintf(dist_str, sizeof(dist_str), "%.2fm", cone.range);
-        text_template.text = dist_str;
-        markers->markers.push_back(text_template);
+        // Marker generation
+        auto markers = std::make_unique<visualization_msgs::msg::MarkerArray>();
+        markers->markers.reserve(final_cones.size() * 2 + 2);
 
-        PointT p_out;
-        p_out.x = cone.x; p_out.y = cone.y; p_out.z = cone.z;
-        p_out.intensity = cone.range; 
-        cones_cloud_out.push_back(p_out);
+        visualization_msgs::msg::Marker delete_template;
+        delete_template.header = msg->header;
+        delete_template.action = visualization_msgs::msg::Marker::DELETEALL;
+        delete_template.id = 0;
+        delete_template.ns = "cones";
+        markers->markers.push_back(delete_template);
+        delete_template.ns = "distance_labels";
+        markers->markers.push_back(delete_template);
 
-        
-        if (cone.cloud && !cone.cloud->empty()) {
-            cone_points_out += *cone.cloud;
+        visualization_msgs::msg::Marker cone_template;
+        cone_template.header = msg->header;
+        cone_template.ns = "cones";
+        cone_template.type = visualization_msgs::msg::Marker::CYLINDER;
+        cone_template.action = visualization_msgs::msg::Marker::ADD;
+        cone_template.lifetime = rclcpp::Duration::from_seconds(0.2);
+        cone_template.scale.x = 0.22; cone_template.scale.y = 0.22;
+        cone_template.color.a = 1.0; 
+
+        visualization_msgs::msg::Marker text_template;
+        text_template.header = msg->header;
+        text_template.ns = "distance_labels";
+        text_template.type = visualization_msgs::msg::Marker::TEXT_VIEW_FACING;
+        text_template.action = visualization_msgs::msg::Marker::ADD;
+        text_template.lifetime = rclcpp::Duration::from_seconds(0.2);
+        text_template.scale.z = 0.15;
+        text_template.color.a = 1.0; text_template.color.r = 1.0; text_template.color.g = 1.0; text_template.color.b = 1.0;
+
+        int id_counter = 1;
+        for (const auto& cone : final_cones) {
+            // Cone Marker
+            cone_template.id = id_counter;
+            cone_template.pose.position.x = cone.x;
+            cone_template.pose.position.y = cone.y;
+            cone_template.pose.position.z = cone.z + (cone.height / 2.0); 
+            cone_template.scale.z = std::max(0.1f, cone.height);
+            
+            if (cone.color == ConeColor::YELLOW) {
+                cone_template.color.r = 1.0f; cone_template.color.g = 1.0f; cone_template.color.b = 0.0f;
+            } else if (cone.color == ConeColor::BLUE) {
+                cone_template.color.r = 0.0f; cone_template.color.g = 0.0f; cone_template.color.b = 1.0f;
+            } else {
+                cone_template.color.r = 0.5f; cone_template.color.g = 0.5f; cone_template.color.b = 0.5f;
+            }
+            markers->markers.push_back(cone_template);
+
+            // Text Label
+            text_template.id = id_counter++;
+            text_template.pose.position.x = cone.x;
+            text_template.pose.position.y = cone.y;
+            text_template.pose.position.z = cone.z + cone.height + 0.20;
+            char dist_str[16];
+            snprintf(dist_str, sizeof(dist_str), "%.1fm", cone.range);
+            text_template.text = dist_str;
+            markers->markers.push_back(text_template);
+
+            // PointCloud Data
+            PointT p_out;
+            p_out.x = cone.x; p_out.y = cone.y; p_out.z = cone.z;
+            p_out.intensity = cone.range; // Carry radial range as per fusion_integration.md
+            next_viz_data_->cones_cloud->push_back(p_out);
+            
+            if (cone.cloud) {
+                *(next_viz_data_->cone_points) += *cone.cloud;
+            }
         }
+        next_viz_data_->markers = std::move(markers);
     }
-
-    // 5. Pubblicazione
-    pub_markers_->publish(std::move(markers));
-
-    // Pubblicazione Nuvola Centroidi
-    auto cones_msg = std::make_unique<sensor_msgs::msg::PointCloud2>();
-    pcl::toROSMsg(cones_cloud_out, *cones_msg);
-    cones_msg->header = msg->header;
-    pub_cones_->publish(std::move(cones_msg));
-
-    // Pubblicazione Nuvola Punti Completi
-    auto cone_points_msg = std::make_unique<sensor_msgs::msg::PointCloud2>();
-    pcl::toROSMsg(cone_points_out, *cone_points_msg);
-    cone_points_msg->header = msg->header;
-    pub_cone_points_->publish(std::move(cone_points_msg));
+    viz_cv_.notify_one();
 
     if (profiler_) {
         profiler_->endFrame(final_cones.size());
@@ -657,7 +662,52 @@ void PerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPtr msg
     }
 }
 
-void PerceptionNode::preProcess(PointCloudPtr cloud) {
+void PerceptionNode::visualizationWorker() {
+    while (rclcpp::ok()) {
+        std::unique_ptr<VizData> data;
+        {
+            std::unique_lock<std::mutex> lock(viz_mutex_);
+            viz_cv_.wait(lock, [this] { return next_viz_data_ || stop_viz_thread_; });
+            
+            if (stop_viz_thread_) break;
+            
+            data = std::move(next_viz_data_);
+        }
+
+        if (!data) continue;
+
+        // 1. Markers
+        if (data->markers) {
+            pub_markers_->publish(std::move(data->markers));
+        }
+
+        // 2. Lidar Viz
+        if (data->cloud_viz) {
+            auto msg = std::make_unique<sensor_msgs::msg::PointCloud2>();
+            pcl::toROSMsg(*(data->cloud_viz), *msg);
+            msg->header = data->header;
+            pub_lidar_viz_->publish(std::move(msg));
+        }
+
+        // 3. Cones
+        if (data->cones_cloud) {
+            auto msg = std::make_unique<sensor_msgs::msg::PointCloud2>();
+            pcl::toROSMsg(*(data->cones_cloud), *msg);
+            msg->header = data->header;
+            pub_cones_->publish(std::move(msg));
+        }
+
+        // 4. Cone Points
+        if (data->cone_points) {
+            auto msg = std::make_unique<sensor_msgs::msg::PointCloud2>();
+            pcl::toROSMsg(*(data->cone_points), *msg);
+            msg->header = data->header;
+            pub_cone_points_->publish(std::move(msg));
+        }
+    }
+}
+
+void PerceptionNode::preProcess(const PointCloudPtr& cloud) {
     if (cloud->empty()) return;
 
     /**

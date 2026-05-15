@@ -21,27 +21,21 @@ Cone ConeEstimator::estimate(const PointCloudPtr& cluster) {
     cone.color = ConeColor::UNKNOWN; 
     cone.confidence = 0.0f;
 
-    // Minimum point filter for reliable estimation
-    if (cluster->size() < 2) {
-        return cone;
-    }
+    if (cluster->size() < 2) return cone;
 
-    // Phase 0: Bounding Box Early Exit (Fast O(N))
-    // This phase is essential for reducing CPU load by filtering out outliers 
-    // such as long walls or ground patches before the more expensive Covariance calculation.
-    PointT min_pt, max_pt;
-    pcl::getMinMax3D(*cluster, min_pt, max_pt);
+    // Phase 1: Feature Extraction (Optimized single-pass extraction)
+    ClusterFeatures features = extractFeatures(cluster);
     
-    float h = max_pt.z - config_.ground_z_level;
-    float w = std::max(max_pt.x - min_pt.x, max_pt.y - min_pt.y);
+    // Phase 0: Bounding Box Early Exit (Fast O(1) after extraction)
+    float h = features.height + (features.z - config_.ground_z_level);
+    float w = features.width_max;
 
     if (h < config_.min_height * 0.8f || h > config_.max_height * 1.2f || w > config_.max_width * 1.5f) {
+        cone.features = features;
         cone.features.rejection_reason = "EARLY_AABB";
         return cone;
     }
 
-    // Phase 1: Feature Extraction
-    ClusterFeatures features = extractFeatures(cluster);
     cone.x = features.x;
     cone.y = features.y;
     cone.z = features.z;
@@ -55,9 +49,9 @@ Cone ConeEstimator::estimate(const PointCloudPtr& cluster) {
     float r = features.range;
 
     // Dynamic point count threshold - Adjusted for 2.0cm Voxel Grid and 40-channel LiDAR
-    // At 10m, 5 points are enough. At 2m, we cap at 60 points (physical limit of 2.0cm voxels on a cone)
+    // At 10m, 5 points are enough. At 2m, we cap at config_.min_points_cap (physical limit)
     int expected_min_points = std::max(3, static_cast<int>(config_.min_points_at_10m * (100.0f / (r*r)))); 
-    expected_min_points = std::min(60, expected_min_points); // CAP at 60 due to 2cm voxelization and 40 channels
+    expected_min_points = std::min(config_.min_points_cap, expected_min_points); 
     
     // Soft-Pass Logic: If the shape is exceptionally vertical and symmetric, 
     // allow a 15% deficit in point count.
@@ -66,6 +60,12 @@ Cone ConeEstimator::estimate(const PointCloudPtr& cluster) {
 
     if (point_pass_ratio < 0.85f && !high_quality_shape) {
         cone.features.rejection_reason = "POINT_COUNT";
+        return cone;
+    }
+
+    // Intensity Filter
+    if (features.avg_intensity < config_.min_intensity) {
+        cone.features.rejection_reason = "LOW_INTENSITY";
         return cone;
     }
 
@@ -116,7 +116,7 @@ Cone ConeEstimator::estimate(const PointCloudPtr& cluster) {
     cone.confidence = 1.0f;
     cone.features.confidence = 1.0f;
     cone.features.rejection_reason = "NONE";
-    cone.color = ConeColor::BLUE;
+    cone.color = ConeColor::UNKNOWN;
     
     return cone;
 }
@@ -124,33 +124,49 @@ Cone ConeEstimator::estimate(const PointCloudPtr& cluster) {
 ClusterFeatures ConeEstimator::extractFeatures(const PointCloudPtr& cluster) {
     ClusterFeatures f;
     f.point_count = cluster->size();
-
     if (f.point_count < 2) return f;
 
-    // 1. Position and distance calculation
-    Eigen::Vector4f centroid;
-    pcl::compute3DCentroid(*cluster, centroid);
-    f.x = centroid[0];
-    f.y = centroid[1];
-    
-    f.range = std::sqrt(f.x * f.x + f.y * f.y);
-    f.bearing = std::atan2(f.y, f.x);
+    // 1. Single pass for Min/Max and Intensity
+    PointT min_pt, max_pt;
+    min_pt.x = min_pt.y = min_pt.z = std::numeric_limits<float>::max();
+    max_pt.x = max_pt.y = max_pt.z = -std::numeric_limits<float>::max();
+    double sum_intensity = 0.0;
 
-    // 2. Shape classification using direct Covariance Matrix (Fast PCA replacement)
-    // Directly compute the 3x3 symmetric covariance matrix. This avoids the high 
-    // overhead of the full SVD (Singular Value Decomposition) used in generic 
-    // PCA implementations. For small point sets like cones, this is significantly faster.
+    for (const auto& pt : cluster->points) {
+        if (pt.x < min_pt.x) min_pt.x = pt.x;
+        if (pt.y < min_pt.y) min_pt.y = pt.y;
+        if (pt.z < min_pt.z) min_pt.z = pt.z;
+        if (pt.x > max_pt.x) max_pt.x = pt.x;
+        if (pt.y > max_pt.y) max_pt.y = pt.y;
+        if (pt.z > max_pt.z) max_pt.z = pt.z;
+        sum_intensity += pt.intensity;
+    }
+
+    f.avg_intensity = static_cast<float>(sum_intensity / f.point_count);
+    f.height = max_pt.z - min_pt.z; 
+    f.z = min_pt.z;
+    float w_x = max_pt.x - min_pt.x;
+    float w_y = max_pt.y - min_pt.y;
+    f.width_max = std::max(w_x, w_y);
+    f.width_min = std::max(0.001f, std::min(w_x, w_y));
+    f.aspect_ratio = (f.height > 0.001f) ? f.width_max / f.height : 0.0f;
+    f.symmetry = f.width_max / f.width_min;
+
+    // 2. Covariance and Mean in one pass
     Eigen::Matrix3f covariance_matrix;
     Eigen::Vector4f mean;
     pcl::computeMeanAndCovarianceMatrix(*cluster, covariance_matrix, mean);
 
-    // Solve for eigenvalues (3x3 symmetric matrix)
-    // The eigenvalues represent the distribution variance along the principal axes.
+    f.x = mean[0];
+    f.y = mean[1];
+    f.range = std::sqrt(f.x * f.x + f.y * f.y);
+    f.bearing = std::atan2(f.y, f.x);
+
+    // 3. Shape classification using Eigen solver
     Eigen::SelfAdjointEigenSolver<Eigen::Matrix3f> solver(covariance_matrix);
-    Eigen::Vector3f eigenvalues = solver.eigenvalues(); // Sorted in ascending order
+    Eigen::Vector3f eigenvalues = solver.eigenvalues(); 
     Eigen::Matrix3f eigenvectors = solver.eigenvectors();
 
-    // Re-order eigenvalues to descending: l1 >= l2 >= l3
     float l1 = eigenvalues[2];
     float l2 = eigenvalues[1];
     float l3 = eigenvalues[0];
@@ -161,39 +177,7 @@ ClusterFeatures ConeEstimator::extractFeatures(const PointCloudPtr& cluster) {
         f.planarity = (l2 - l3) / l1;
         f.scattering = l3 / l1;
     }
-    
-    // Verticality: dot product of primary eigenvector and Z-axis
     f.verticality = std::abs(eigenvectors(2, 2)); 
-
-    // 3. Intensity analysis
-    double sum_intensity = 0.0;
-    for (const auto& pt : cluster->points) {
-        sum_intensity += pt.intensity;
-    }
-    f.avg_intensity = static_cast<float>(sum_intensity / f.point_count);
-    
-    // 4. Geometric dimensions (Bounding Box)
-    PointT min_pt, max_pt;
-    pcl::getMinMax3D(*cluster, min_pt, max_pt);
-    
-    // Robust Height: The difference between the highest and lowest point in the cluster.
-    // This is the 'visible' height.
-    f.height = max_pt.z - min_pt.z; 
-    
-    // Also track the 'absolute' height from the expected ground level
-    float absolute_height = max_pt.z - config_.ground_z_level;
-    
-    // If the visible height is much smaller than the absolute height, 
-    // it confirms the ground remover clipped the base.
-    f.z = min_pt.z;
-
-    float w_x = max_pt.x - min_pt.x;
-    float w_y = max_pt.y - min_pt.y;
-    f.width_max = std::max(w_x, w_y);
-    f.width_min = std::max(0.001f, std::min(w_x, w_y));
-    
-    f.aspect_ratio = (f.height > 0.001f) ? f.width_max / f.height : 0.0f;
-    f.symmetry = f.width_max / f.width_min;
 
     return f;
 }

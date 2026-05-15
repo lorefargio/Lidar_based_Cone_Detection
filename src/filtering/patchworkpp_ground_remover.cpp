@@ -58,14 +58,13 @@ void PatchworkppGroundRemover::removeGround(const PointCloudConstPtr& cloud_in,
     populate_from_indices(ground_idx, cloud_ground);
     populate_from_indices(nonground_idx, cloud_obstacles);
 
-    // Apply voxel filter to obstacles if enabled
     if (voxel_size_ > 0.001f) {
         pcl::VoxelGrid<PointT> voxel_grid;
         voxel_grid.setInputCloud(cloud_obstacles);
         voxel_grid.setLeafSize(voxel_size_, voxel_size_, voxel_size_);
         PointCloudPtr filtered(new PointCloud);
         voxel_grid.filter(*filtered);
-        *cloud_obstacles = *filtered;
+        cloud_obstacles = filtered;
     }
 }
 

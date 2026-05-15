@@ -15,9 +15,8 @@ void GridClusterer::cluster(const PointCloudPtr& cloud, std::vector<PointCloudPt
         return;
     }
 
-    // Identify occupied cells to restrict subsequent traversal and cleanup to O(N_occupied).
-    std::vector<int> occupied_indices;
-    occupied_indices.reserve(cloud->size());
+    occupied_indices_.clear();
+    occupied_indices_.reserve(cloud->size() / 10); // Heuristic
 
     // Phase 1: Spatial Discretization (O(N))
     for (size_t i = 0; i < cloud->points.size(); ++i) {
@@ -32,7 +31,7 @@ void GridClusterer::cluster(const PointCloudPtr& cloud, std::vector<PointCloudPt
         if (idx < 0 || idx >= static_cast<int>(grid_.size())) continue;
 
         if (grid_[idx].point_indices.empty()) {
-            occupied_indices.push_back(idx);
+            occupied_indices_.push_back(idx);
             grid_[idx].id = -1; // Reset classification state for this frame.
         }
         grid_[idx].point_indices.push_back(i);
@@ -45,7 +44,7 @@ void GridClusterer::cluster(const PointCloudPtr& cloud, std::vector<PointCloudPt
     const int dy[] = {-1,  0,  1, -1, 1, -1, 0, 1};
 
     // Phase 2: Connected Components Analysis via Breadth-First Search (BFS)
-    for (int start_idx : occupied_indices) {
+    for (int start_idx : occupied_indices_) {
         Cell& start_cell = grid_[start_idx];
         if (start_cell.id != -1) continue;
 
@@ -92,7 +91,7 @@ void GridClusterer::cluster(const PointCloudPtr& cloud, std::vector<PointCloudPt
 
     // Phase 3: Selective Reset
     // Only resets cells that were modified, preserving O(N_occupied) performance.
-    for (int idx : occupied_indices) {
+    for (int idx : occupied_indices_) {
         grid_[idx].point_indices.clear();
         grid_[idx].id = -1;
     }
