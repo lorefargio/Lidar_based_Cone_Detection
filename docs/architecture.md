@@ -12,20 +12,21 @@ graph TD
     B --> C[Deskewing]
     C --> D[Ground Removal]
     D --> E[Clustering]
-    E --> F[Weighted Aggregation]
+    E --> F[Cluster Merging]
     F --> G[Cone Estimation]
-    G --> H[Final Markers]
+    G --> H[Weighted Spatial Aggregation]
+    H --> I[Final Markers]
 
     subgraph "Phase 1: Stabilization"
         B -- "2.0cm Voxel Filter" --> C
     end
 
     subgraph "Phase 2: Grouping"
-        E -- "12cm Grid Resolution" --> F
+        E -- "Gated Proximity" --> F
     end
 
     subgraph "Phase 3: Classification"
-        F -- "Soft-Pass Hysteresis" --> G
+        G -- "Soft-Pass Hysteresis" --> H
     end
 ```
 
@@ -35,5 +36,7 @@ graph TD
 2.  **Deskewing**: High-frequency IMU integration (NLERP) to compensate for sensor motion during the sweep.
 3.  **Ground Removal**: Binary segmentation of the environment into traversable surface and obstacle candidates (using Patchwork++ or Slope Analysis).
 4.  **Clustering**: Spatial grouping of obstacle points into candidate clusters.
-5.  **Weighted Aggregation**: Instead of standard NMS, positions are averaged across nearby candidates to ensure smooth, fluid motion in the output.
+5.  **Cluster Merging**: Geometric unification of fragmented clusters. Candidates within **0.25m** are merged to form a single volumetric object, improving detection stability for sparse returns.
 6.  **Cone Estimation**: Bayesian-like geometric validation using PCA-derived features (linearity, planarity, scattering) and dynamic thresholds with soft-pass logic.
+7.  **Weighted Spatial Aggregation**: Instead of standard NMS, positions are averaged across nearby candidates to ensure smooth, fluid motion in the output.
+8.  **Final Markers**: Asynchronous publication of visualization markers and semantic point clouds for fusion.

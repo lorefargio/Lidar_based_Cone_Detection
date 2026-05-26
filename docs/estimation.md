@@ -8,7 +8,7 @@ The classification stage follows a hierarchical process designed for stability.
 
 ```mermaid
 graph TD
-    A[Cluster Candidate] --> B[Bounding Box Early Exit]
+    A[Merged Cluster Candidate] --> B[Bounding Box Early Exit]
     B --> C[PCA Extraction]
     C --> D[Point Count Thresholding]
     D -- "Pass" --> G[Accept]

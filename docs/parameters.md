@@ -32,8 +32,6 @@ This document defines the configuration space for the LiDAR perception pipeline.
 | `pca_min_scatter` | `0.02` | - | Min scattering for 3D shape. |
 | `verticality_min` | **`0.65`** | - | Min verticality threshold. |
 | `min_intensity` | **`5.0`** | - | Min average intensity for any cone detection. |
-| `rule_yellow_intensity_threshold` | **`25.0`** | - | Intensity threshold to distinguish YELLOW from BLUE cones. |
-| `rule_color_range` | **`5.0`** | m | Max range for intensity-based color classification. |
 
 ## 5. Spatial Aggregation
 | Parameter | Default | Unit | Description |
