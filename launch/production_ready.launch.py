@@ -1,13 +1,11 @@
 import os
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, ExecuteProcess
-from launch.substitutions import LaunchConfiguration, PythonExpression
-from launch.conditions import IfCondition
+from launch.actions import DeclareLaunchArgument
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 def generate_launch_description():
-    # --- 1. GENERAL ARGUMENTS ---
-    bag_arg = DeclareLaunchArgument('bag', default_value='', description='Path to rosbag to play')
+    # --- 1. GENERAL PIPELINE SELECTION ---
     cl_algo_arg = DeclareLaunchArgument('clustering_algorithm', default_value='grid', description='Algorithm: grid, euclidean, depth, dbscan, hdbscan, voxel')
     gr_type_arg = DeclareLaunchArgument('ground_remover_type', default_value='patchworkpp', description='Algorithm: bin_based, slope_based, patchworkpp')
     estimator_type_arg = DeclareLaunchArgument('estimator_type', default_value='rule_based')
@@ -74,27 +72,38 @@ def generate_launch_description():
     # --- 6. POST-PROCESSING & DESKEWING ---
     merge_dist_arg = DeclareLaunchArgument('merge_dist', default_value='0.25')
     tracking_match_dist_arg = DeclareLaunchArgument('tracking_match_dist', default_value='0.45')
-    use_deskew_arg = DeclareLaunchArgument('use_deskewing', default_value='false')
+    use_deskew_arg = DeclareLaunchArgument('use_deskewing', default_value='true')
     imu_topic_arg = DeclareLaunchArgument('imu_topic', default_value='/zed/zed_node/imu/data')
     deskew_trans_arg = DeclareLaunchArgument('deskew_use_translation', default_value='true')
-    static_imu_to_lidar_xyz_arg = DeclareLaunchArgument('static_imu_to_lidar_xyz', default_value='[-0.037, 0.0335, 0.053]')
+    roll_arg = DeclareLaunchArgument(
+        'roll', default_value='-0.4',
+        description='Fine-tune roll correction for extrinsic rotation in degrees'
+    )
+    pitch_arg = DeclareLaunchArgument(
+        'pitch', default_value='0.0',
+        description='Fine-tune pitch correction for extrinsic rotation in degrees'
+    )
+    yaw_arg = DeclareLaunchArgument(
+        'yaw', default_value='0.0',
+        description='Fine-tune yaw correction for extrinsic rotation in degrees'
+    )
     use_vox_filt_arg = DeclareLaunchArgument('use_voxel_filter', default_value='false')
     vox_size_arg = DeclareLaunchArgument('voxel_size', default_value='0.02')
 
-    # --- 7. LOGGING & DEBUG ---
+    # --- 7. LOGGING & DIAGNOSTICS ---
     log_dir_arg = DeclareLaunchArgument('log_dir', default_value='log_profiler/')
-    log_clusters_arg = DeclareLaunchArgument('log_clusters', default_value='true')
+    log_clusters_arg = DeclareLaunchArgument('log_clusters', default_value='false') # Default false for production
     log_all_clusters_arg = DeclareLaunchArgument('log_all_clusters', default_value='false', description='Log all clusters for recall analysis')
-    debug_freq_arg = DeclareLaunchArgument('debug_pub_freq', default_value='10')
+    debug_freq_arg = DeclareLaunchArgument('debug_pub_freq', default_value='50') # Slow down debug publishing in production
+    debug_arg = DeclareLaunchArgument('debug', default_value='false', description='Toggle debug visualization topics')
 
-    # Our perception node
+    # LiDAR Perception Node
     perception_node = Node(
         package='lidar_perception',
         executable='perception_node',
         name='lidar_perception_node',
         output='screen',
         parameters=[{
-            'bag_path': LaunchConfiguration('bag'),
             'clustering_algorithm': LaunchConfiguration('clustering_algorithm'),
             'ground_remover_type': LaunchConfiguration('ground_remover_type'),
             'estimator_type': LaunchConfiguration('estimator_type'),
@@ -145,38 +154,22 @@ def generate_launch_description():
             'use_deskewing': LaunchConfiguration('use_deskewing'),
             'imu_topic': LaunchConfiguration('imu_topic'),
             'deskew_use_translation': LaunchConfiguration('deskew_use_translation'),
-            'static_imu_to_lidar_xyz': LaunchConfiguration('static_imu_to_lidar_xyz'),
+            'roll': LaunchConfiguration('roll'),
+            'pitch': LaunchConfiguration('pitch'),
+            'yaw': LaunchConfiguration('yaw'),
+            'extrinsic_rotation': [0.999743, 0.0226629, 7.2829e-10, 8.06016e-10, -3.42052e-09, -1.0, -0.0226629, 0.999743, -3.43791e-09],
+            'extrinsic_translation': [0.0498833, -0.10403, -0.0324321],
             'use_voxel_filter': LaunchConfiguration('use_voxel_filter'),
             'voxel_size': LaunchConfiguration('voxel_size'),
             'log_dir': LaunchConfiguration('log_dir'),
             'log_clusters': LaunchConfiguration('log_clusters'),
             'log_all_clusters': LaunchConfiguration('log_all_clusters'),
             'debug_pub_freq': LaunchConfiguration('debug_pub_freq'),
+            'debug': LaunchConfiguration('debug'),
         }]
     )
 
-
-    #Foxglove Bridge Node (allows Foxglove Studio to connect via WebSockets)
-    # foxglove_node = Node(
-    #     package='foxglove_bridge',
-    #     executable='foxglove_bridge',
-    #     name='foxglove_bridge',
-    #     output='screen',
-    #     parameters=[{
-    #         'port': 8765,
-    #         'address': '0.0.0.0',
-    #         'tls': False,
-    #         'topic_whitelist': ['/perception/.*', '/lidar_points',],
-    #         'send_buffer_limit': 100000000,
-    #         'use_compression': False, # Disable compression to save CPU on heavy clouds
-    #         'max_update_ms': 20,
-    #         'min_qos_depth': 1,
-    #     }]
-    # )
-
-
     return LaunchDescription([
-        bag_arg,
         cl_algo_arg,
         gr_type_arg,
         estimator_type_arg,
@@ -224,17 +217,18 @@ def generate_launch_description():
         use_deskew_arg,
         imu_topic_arg,
         deskew_trans_arg,
-        static_imu_to_lidar_xyz_arg,
+        roll_arg,
+        pitch_arg,
+        yaw_arg,
         use_vox_filt_arg,
         vox_size_arg,
         log_dir_arg,
         log_clusters_arg,
         log_all_clusters_arg,
         debug_freq_arg,
+        debug_arg,
         rule_pts_cap_arg,
         merge_dist_arg,
         tracking_match_dist_arg,
-        perception_node,
-       # foxglove_node,
+        perception_node
     ])
-        

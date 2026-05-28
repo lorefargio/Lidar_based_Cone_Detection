@@ -1,6 +1,7 @@
 #include "clustering/grid_clusterer.hpp"
 #include <queue>
 #include <cmath>
+#include <rclcpp/rclcpp.hpp>
 
 namespace lidar_perception {
 
@@ -19,16 +20,23 @@ void GridClusterer::cluster(const PointCloudPtr& cloud, std::vector<PointCloudPt
     occupied_indices_.reserve(cloud->size() / 10); // Heuristic
 
     // Phase 1: Spatial Discretization (O(N))
+    int out_of_bounds_count = 0;
     for (size_t i = 0; i < cloud->points.size(); ++i) {
         const auto& pt = cloud->points[i];
         
-        if (std::abs(pt.x) > max_range_ || std::abs(pt.y) > max_range_) continue;
+        if (std::abs(pt.x) > max_range_ || std::abs(pt.y) > max_range_) {
+            out_of_bounds_count++;
+            continue;
+        }
 
         int gx = static_cast<int>(std::floor(pt.x / grid_res_));
         int gy = static_cast<int>(std::floor(pt.y / grid_res_));
         
         int idx = getGridIndex(gx, gy);
-        if (idx < 0 || idx >= static_cast<int>(grid_.size())) continue;
+        if (idx < 0 || idx >= static_cast<int>(grid_.size())) {
+            out_of_bounds_count++;
+            continue;
+        }
 
         if (grid_[idx].point_indices.empty()) {
             occupied_indices_.push_back(idx);

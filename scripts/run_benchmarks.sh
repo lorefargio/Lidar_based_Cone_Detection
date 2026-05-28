@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # --- Configuration ---
-ROSBAG_PATH=$1
+ROSBAG_PATH=/workspace/20260415_Acceleration_Fusion_Synced/
 RESULTS_DIR="${PERCEPTION_LOG_DIR:-log_profiler}"
 NODE_NAME="perception_node"
 
@@ -42,6 +42,7 @@ for ALGO in "${CLUSTERING_ALGOS[@]}"; do
     setsid ros2 run lidar_perception $NODE_NAME --ros-args \
         -p clustering_algorithm:=$ALGO \
         -p ground_remover_type:=patchworkpp \
+        -p use_deskewing:=false \
         -p bag_path:="$ROSBAG_PATH" &
     NODE_PID=$!
 

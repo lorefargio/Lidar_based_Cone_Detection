@@ -31,6 +31,10 @@ find_package(visualization_msgs REQUIRED)
 find_package(pcl_conversions REQUIRED)
 find_package(pcl_ros REQUIRED)
 find_package(patchworkpp REQUIRED)
+find_package(tf2 REQUIRED)
+find_package(tf2_ros REQUIRED)
+find_package(tf2_eigen REQUIRED)
+find_package(geometry_msgs REQUIRED)
 
 # Eigen: Required for matrix transformations and linear algebra
 find_package(Eigen3 REQUIRED)
@@ -56,7 +60,10 @@ add_executable(perception_node
   src/estimation/cone_estimator.cpp
   src/utils/performance_profiler.cpp
   src/utils/cluster_logger.cpp
-  src/utils/deskewer.cpp
+  src/utils/transform_manager.cpp
+  src/utils/imu_interpolator.cpp
+  src/utils/deskew_engine.cpp
+  src/utils/clock_aligner.cpp
 )
 
 # --- 6. INCLUDE DIRECTORIES ---
@@ -80,6 +87,10 @@ ament_target_dependencies(perception_node
   pcl_conversions
   pcl_ros
   patchworkpp
+  tf2
+  tf2_ros
+  tf2_eigen
+  geometry_msgs
 )
 
 # External Library Linking

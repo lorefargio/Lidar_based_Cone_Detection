@@ -27,7 +27,7 @@ Cone ConeEstimator::estimate(const PointCloudPtr& cluster) {
     ClusterFeatures features = extractFeatures(cluster);
     
     // Phase 0: Bounding Box Early Exit (Fast O(1) after extraction)
-    float h = features.height + (features.z - config_.ground_z_level);
+    float h = features.height; // Direct cluster height independent of absolute ground level
     float w = features.width_max;
 
     if (h < config_.min_height * 0.8f || h > config_.max_height * 1.2f || w > config_.max_width * 1.5f) {

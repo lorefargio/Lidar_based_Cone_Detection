@@ -31,8 +31,11 @@
 #include "clustering/clusterer_interface.hpp"
 #include "estimation/cone_estimator.hpp"
 #include "utils/performance_profiler.hpp"
-#include "utils/deskewer.hpp"
+#include "utils/transform_manager.hpp"
+#include "utils/imu_interpolator.hpp"
+#include "utils/deskew_engine.hpp"
 #include "utils/cluster_logger.hpp"
+#include "utils/clock_aligner.hpp"
 
 namespace lidar_perception {
 
@@ -72,6 +75,21 @@ public:
     ~PerceptionNode() override;
 
 private:
+    // Node Initialization Helpers
+    void initializeParameters();
+    void initializeGroundRemover();
+    void initializeClusterer();
+    void initializeEstimator();
+    void initializeDeskewing();
+
+    // Pipeline Stage Helpers
+    bool convertAndPreprocess(const sensor_msgs::msg::PointCloud2::SharedPtr& msg);
+    void performDeskewing(const sensor_msgs::msg::PointCloud2::SharedPtr& msg, PointCloudPtr& processing_cloud);
+    void performClusteringAndMerging(const PointCloudPtr& obstacles_cloud, std::vector<PointCloudPtr>& merged_clusters);
+    void estimateCones(const std::vector<PointCloudPtr>& merged_clusters, std::vector<Cone>& candidate_cones);
+    void aggregateDuplicates(const std::vector<Cone>& candidate_cones, std::vector<Cone>& final_cones);
+    void handoverToVisualization(const sensor_msgs::msg::PointCloud2::SharedPtr& msg, const PointCloudPtr& processing_cloud, const std::vector<PointCloudPtr>& merged_clusters, const std::vector<Cone>& final_cones);
+
     /**
      * @brief Primary processing pipeline callback.
      * 
@@ -114,6 +132,7 @@ private:
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_cones_;   ///< Object centroids publisher.
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_cone_points_; ///< Raw object points publisher.
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_lidar_viz_;   ///< Lightweight original cloud for visualization.
+    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_obstacles_;   ///< Ground-removed, deskewed obstacle points publisher.
 
     // Core pipeline components
     PointCloudPtr raw_cloud_ptr_{new PointCloud};      ///< Buffer for raw input cloud.
@@ -127,6 +146,7 @@ private:
         PointCloudPtr cloud_viz;
         PointCloudPtr cones_cloud;
         PointCloudPtr cone_points;
+        PointCloudPtr obstacles_cloud;
         std::unique_ptr<visualization_msgs::msg::MarkerArray> markers;
     };
     std::deque<std::unique_ptr<VizData>> viz_queue_;
@@ -138,7 +158,10 @@ private:
     std::unique_ptr<GroundRemoverInterface> ground_remover_; ///< Abstract ground removal interface.
     std::unique_ptr<ClustererInterface> clusterer_;          ///< Abstract clustering interface.
     std::unique_ptr<ConeEstimator> estimator_;               ///< Geometric object classification engine.
-    std::unique_ptr<Deskewer> deskewer_;                     ///< Lidar motion compensation module.
+    std::unique_ptr<fs_fusion::TransformManager> tf_manager_;
+    std::unique_ptr<fs_fusion::ImuInterpolator> imu_interpolator_;
+    std::unique_ptr<fs_fusion::DeskewEngine> deskew_engine_;
+    std::unique_ptr<fs_fusion::ClockAligner> clock_aligner_;
     
     // Benchmarking and diagnostics
     std::unique_ptr<PerformanceProfiler> profiler_; ///< Real-time latency tracking.
@@ -147,6 +170,7 @@ private:
     std::string csv_file_path_;                     ///< Destination path for cluster logs.
     std::string config_json_file_path_;             ///< Destination path for configuration log.
     int frame_counter_ = 0;                         ///< Incremental frame index.
+    bool debug_mode_ = false;                       ///< Toggle high-overhead debugging publications.
 };
 
 } // namespace lidar_perception

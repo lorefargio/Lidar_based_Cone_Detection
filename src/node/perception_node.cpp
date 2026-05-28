@@ -30,29 +30,123 @@ namespace pcl {
 namespace lidar_perception {
 
 PerceptionNode::PerceptionNode() : Node("lidar_perception_node") {
-    // --- 1. GENERAL PARAMETERS ---
-    this->declare_parameter<std::string>("bag_path", "");
+    // 1. Initialize parameters and modular pipeline components
+    initializeParameters();
+    initializeGroundRemover();
+    initializeClusterer();
+    initializeEstimator();
+    initializeDeskewing();
+
+    // 2. Setup Logging & Profiling directories
+    std::string log_dir = this->get_parameter("log_dir").as_string();
+    if (!log_dir.empty() && log_dir.back() != '/') log_dir += '/';
+    std::filesystem::create_directories(log_dir); 
+    
+    std::string cl_algo = this->get_parameter("clustering_algorithm").as_string();
+    std::string gr_type = this->get_parameter("ground_remover_type").as_string();
+    std::string profile_name = cl_algo + "_" + gr_type;
+    profiler_ = std::make_unique<PerformanceProfiler>(profile_name);
+    json_file_path_ = log_dir + "profiler_" + profile_name + ".json";
+
+    if (this->get_parameter("log_clusters").as_bool()) {
+        cluster_logger_ = std::make_unique<ClusterLogger>(profile_name);
+        csv_file_path_ = log_dir + "clusters_" + profile_name + ".csv";
+        config_json_file_path_ = log_dir + "config_" + profile_name + ".json";
+    }
+
+    // 3. Create publishers & subscribers
+    sub_lidar_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
+        "/lidar_points", rclcpp::SensorDataQoS(), 
+        std::bind(&PerceptionNode::callback, this, std::placeholders::_1));
+
+    pub_markers_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("/perception/cones_vis", rclcpp::SensorDataQoS());
+    pub_cones_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/perception/cones", rclcpp::SensorDataQoS());
+    pub_cone_points_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/perception/cone_points", rclcpp::SensorDataQoS());
+    pub_lidar_viz_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/perception/lidar_viz", rclcpp::SensorDataQoS());
+    pub_obstacles_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/perception/obstacles", rclcpp::SensorDataQoS());
+
+    // 4. Start asynchronous visualization worker thread
+    viz_thread_ = std::thread(&PerceptionNode::visualizationWorker, this);
+}
+
+PerceptionNode::~PerceptionNode() {
+    {
+        std::lock_guard<std::mutex> lock(viz_mutex_);
+        stop_viz_thread_ = true;
+    }
+    viz_cv_.notify_all();
+    if (viz_thread_.joinable()) viz_thread_.join();
+
+    if (profiler_) {
+        profiler_->saveToJSON(json_file_path_);
+        RCLCPP_INFO(this->get_logger(), "Profiling data saved to JSON before exit.");
+    }
+    if (cluster_logger_ && !csv_file_path_.empty()) {
+        cluster_logger_->saveToCSV(csv_file_path_);
+        saveConfig(config_json_file_path_);
+        RCLCPP_INFO(this->get_logger(), "Cluster analysis data and config saved before exit.");
+    }
+}
+
+void PerceptionNode::saveConfig(const std::string& filepath) {
+    std::ofstream out(filepath);
+    if (!out.is_open()) return;
+
+    auto params = this->get_parameters(this->list_parameters({}, 0).names);
+    
+    out << "{\n";
+    for (size_t i = 0; i < params.size(); ++i) {
+        out << "  \"" << params[i].get_name() << "\": ";
+        if (params[i].get_type() == rclcpp::ParameterType::PARAMETER_STRING) {
+            out << "\"" << params[i].as_string() << "\"";
+        } else if (params[i].get_type() == rclcpp::ParameterType::PARAMETER_DOUBLE) {
+            out << params[i].as_double();
+        } else if (params[i].get_type() == rclcpp::ParameterType::PARAMETER_INTEGER) {
+            out << params[i].as_int();
+        } else if (params[i].get_type() == rclcpp::ParameterType::PARAMETER_BOOL) {
+            out << (params[i].as_bool() ? "true" : "false");
+        } else if (params[i].get_type() == rclcpp::ParameterType::PARAMETER_DOUBLE_ARRAY) {
+            out << "[";
+            auto arr = params[i].as_double_array();
+            for (size_t j = 0; j < arr.size(); ++j) {
+                out << arr[j] << (j < arr.size() - 1 ? ", " : "");
+            }
+            out << "]";
+        } else {
+            out << "null";
+        }
+        out << (i < params.size() - 1 ? ",\n" : "\n");
+    }
+    out << "}\n";
+    out.close();
+}
+
+// ============================================================================
+// NODE INITIALIZATION HELPERS
+// ============================================================================
+
+void PerceptionNode::initializeParameters() {
+    // Pipeline selection parameters
     this->declare_parameter<std::string>("clustering_algorithm", "grid");
-    this->declare_parameter<std::string>("ground_remover_type", "slope_based");
+    this->declare_parameter<std::string>("ground_remover_type", "patchworkpp");
     this->declare_parameter<std::string>("estimator_type", "rule_based");
     this->declare_parameter<std::string>("log_dir", "log_profiler/");
     this->declare_parameter<bool>("log_clusters", true);
     this->declare_parameter<bool>("log_all_clusters", false);
     
-    // Common geometric/filtering parameters
+    // Core physical/geometric thresholds
     this->declare_parameter<double>("sensor_z", -0.52);
     this->declare_parameter<double>("max_range", 25.0);
     this->declare_parameter<int>("min_cluster_size", 2);
     this->declare_parameter<int>("max_cluster_size", 300);
-    
-    std::string bag_path = this->get_parameter("bag_path").as_string();
-    if (bag_path.empty()) {
-        RCLCPP_ERROR(this->get_logger(), "FATAL: 'bag_path' parameter is missing!");
-        rclcpp::shutdown();
-        exit(EXIT_FAILURE);
-    }
+    this->declare_parameter<int>("debug_pub_freq", 10);
 
-    // --- 2. GROUND REMOVAL CONFIGURATION ---
+    // Toggle high-overhead debugging publications (MarkerArray & lightweight raw cloud)
+    this->declare_parameter<bool>("debug", true);
+    debug_mode_ = this->get_parameter("debug").as_bool();
+}
+
+void PerceptionNode::initializeGroundRemover() {
     std::string gr_type = this->get_parameter("ground_remover_type").as_string();
     float sensor_z = static_cast<float>(this->get_parameter("sensor_z").as_double());
     float max_range = static_cast<float>(this->get_parameter("max_range").as_double());
@@ -119,18 +213,19 @@ PerceptionNode::PerceptionNode() : Node("lidar_perception_node") {
 
     // Configure Modular Voxel Filter in Ground Remover
     this->declare_parameter<bool>("use_voxel_filter", false);
-    this->declare_parameter<double>("voxel_size", 0.02); // Recommended for older hardware
+    this->declare_parameter<double>("voxel_size", 0.02);
 
     if (this->get_parameter("use_voxel_filter").as_bool() && ground_remover_) {
         double leaf_size = this->get_parameter("voxel_size").as_double();
-        
         ground_remover_->setVoxelFilter(static_cast<float>(leaf_size));
     }
+}
 
-    // --- 3. CLUSTERING CONFIGURATION ---
+void PerceptionNode::initializeClusterer() {
     std::string cl_algo = this->get_parameter("clustering_algorithm").as_string();
     int min_cluster = this->get_parameter("min_cluster_size").as_int();
     int max_cluster = this->get_parameter("max_cluster_size").as_int();
+    float max_range = static_cast<float>(this->get_parameter("max_range").as_double());
 
     if (cl_algo == "euclidean") {
         this->declare_parameter<double>("euclidean_tolerance", 0.35);
@@ -154,13 +249,13 @@ PerceptionNode::PerceptionNode() : Node("lidar_perception_node") {
         clusterer_ = std::make_unique<HDBSCANClusterer>(cfg);
         RCLCPP_INFO(this->get_logger(), "Clustering: TRUE HDBSCAN (Lidar-Aware)");
     } else if (cl_algo == "voxel") {
-        this->declare_parameter<double>("voxel_grid_size", 0.15);
+        this->declare_parameter<double>("voxel_grid_size", 0.02);
         float v_size = static_cast<float>(this->get_parameter("voxel_grid_size").as_double());
         clusterer_ = std::make_unique<VoxelConnectedComponents>(v_size, min_cluster, max_cluster);
         RCLCPP_INFO(this->get_logger(), "Clustering: VOXEL");
     } else if (cl_algo == "depth") {
         DepthClusterer::Config cfg;
-        this->declare_parameter<double>("depth_theta_thr", 8.0);
+        this->declare_parameter<double>("depth_theta_thr", 10.0);
         this->declare_parameter<int>("depth_num_rings", 32);
         cfg.theta_threshold_deg = static_cast<float>(this->get_parameter("depth_theta_thr").as_double());
         cfg.num_rings = this->get_parameter("depth_num_rings").as_int();
@@ -174,19 +269,22 @@ PerceptionNode::PerceptionNode() : Node("lidar_perception_node") {
         clusterer_ = std::make_unique<GridClusterer>(res, max_range, min_cluster, max_cluster);
         RCLCPP_INFO(this->get_logger(), "Clustering: GRID");
     }
+}
 
-    // --- 4. ESTIMATION CONFIGURATION ---
-    // PCA Params
-    this->declare_parameter<double>("pca_max_linearity", 0.8);
+void PerceptionNode::initializeEstimator() {
+    float sensor_z = static_cast<float>(this->get_parameter("sensor_z").as_double());
+
+    // PCA Feature thresholds
+    this->declare_parameter<double>("pca_max_linearity", 0.88);
     this->declare_parameter<double>("pca_max_planarity", 0.8);
     this->declare_parameter<double>("pca_min_scatter", 0.02);
     this->declare_parameter<double>("pca_min_verticality", 0.65);
     
     ConeEstimator::Config est_cfg;
     this->declare_parameter<double>("rule_min_height", 0.10);
-    this->declare_parameter<double>("rule_max_height", 0.50);
+    this->declare_parameter<double>("rule_max_height", 0.80);
     this->declare_parameter<double>("rule_base_min_width", 0.10);
-    this->declare_parameter<double>("rule_max_width", 0.36);
+    this->declare_parameter<double>("rule_max_width", 0.50);
     this->declare_parameter<double>("rule_dynamic_width_decay", 0.005);
     this->declare_parameter<int>("rule_min_points_at_10m", 5);
     this->declare_parameter<int>("rule_min_points_cap", 60);
@@ -209,120 +307,57 @@ PerceptionNode::PerceptionNode() : Node("lidar_perception_node") {
     estimator_ = std::make_unique<ConeEstimator>(est_cfg);
     RCLCPP_INFO(this->get_logger(), "Estimator: CONSOLIDATED CONE-ESTIMATOR");
 
-    // --- 5. POST-PROCESSING & AGGREGATION ---
+    // Post-processing & Aggregation defaults
     this->declare_parameter<double>("merge_dist", 0.25);
     this->declare_parameter<double>("tracking_match_dist", 0.45);
+}
 
-    // --- 6. DESKEWING CONFIGURATION ---
+void PerceptionNode::initializeDeskewing() {
     this->declare_parameter<bool>("use_deskewing", true);
     this->declare_parameter<std::string>("imu_topic", "/zed/zed_node/imu/data");
-    this->declare_parameter<bool>("deskew_use_translation", true);
-    this->declare_parameter<std::vector<double>>("static_imu_to_lidar_xyz", {-0.037, 0.0335, 0.053});
+    this->declare_parameter<std::vector<double>>("extrinsic_rotation", {0.999743, 0.0226629, 7.2829e-10, 8.06016e-10, -3.42052e-09, -1.0, -0.0226629, 0.999743, -3.43791e-09});
+    this->declare_parameter<std::vector<double>>("extrinsic_translation", {0.0498833, -0.10403, -0.0324321});
+    this->declare_parameter<double>("roll", -0.4);
+    this->declare_parameter<double>("pitch", 0.0);
+    this->declare_parameter<double>("yaw", 0.0);
+
+    clock_aligner_ = std::make_unique<fs_fusion::ClockAligner>();
 
     if (this->get_parameter("use_deskewing").as_bool()) {
-        Deskewer::Config d_cfg;
-        d_cfg.use_translation = this->get_parameter("deskew_use_translation").as_bool();
+        auto rot = this->get_parameter("extrinsic_rotation").as_double_array();
+        auto trans = this->get_parameter("extrinsic_translation").as_double_array();
+        double r = this->get_parameter("roll").as_double();
+        double p = this->get_parameter("pitch").as_double();
+        double y = this->get_parameter("yaw").as_double();
+
+        tf_manager_ = std::make_unique<fs_fusion::TransformManager>(
+            this->get_clock(), rot, trans, r, p, y);
+        imu_interpolator_ = std::make_unique<fs_fusion::ImuInterpolator>();
+        deskew_engine_ = std::make_unique<fs_fusion::DeskewEngine>();
         
-        auto xyz = this->get_parameter("static_imu_to_lidar_xyz").as_double_array();
-        if (xyz.size() == 3) {
-            d_cfg.static_imu_to_lidar = Eigen::Vector3f(xyz[0], xyz[1], xyz[2]);
-        }
-        
-        deskewer_ = std::make_unique<Deskewer>(d_cfg);
-        RCLCPP_INFO(this->get_logger(), "Deskewing: ENABLED");
-    }
+        RCLCPP_INFO(this->get_logger(), "High-Precision Dynamic Deskewing: ENABLED");
 
-    // --- 6. POST-PROCESSING & BENCHMARKING ---
-    std::string log_dir = this->get_parameter("log_dir").as_string();
-    if (!log_dir.empty() && log_dir.back() != '/') log_dir += '/';
-    std::filesystem::create_directories(log_dir); 
-    
-    this->declare_parameter<int>("debug_pub_freq", 10); // Publish debug clouds every 10 frames
-    
-    // Combine clustering and ground removal algorithm names for profiling
-    std::string profile_name = cl_algo + "_" + gr_type;
-    profiler_ = std::make_unique<PerformanceProfiler>(profile_name);
-    json_file_path_ = log_dir + "profiler_" + profile_name + ".json";
-
-    if (this->get_parameter("log_clusters").as_bool()) {
-        cluster_logger_ = std::make_unique<ClusterLogger>(profile_name);
-        csv_file_path_ = log_dir + "clusters_" + profile_name + ".csv";
-        config_json_file_path_ = log_dir + "config_" + profile_name + ".json";
-    }
-
-    // --- 7. PUBLISHERS & SUBSCRIBERS ---
-    sub_lidar_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
-        "/lidar_points", rclcpp::SensorDataQoS(), 
-        std::bind(&PerceptionNode::callback, this, std::placeholders::_1));
-
-    if (this->get_parameter("use_deskewing").as_bool()) {
         sub_imu_ = this->create_subscription<sensor_msgs::msg::Imu>(
             this->get_parameter("imu_topic").as_string(), 100, 
             [this](const sensor_msgs::msg::Imu::SharedPtr msg) {
-                if (deskewer_) deskewer_->addImuMessage(msg);
+                if (imu_interpolator_) {
+                    fs_fusion::ImuData data;
+                    uint64_t ts_ns = rclcpp::Time(msg->header.stamp).nanoseconds();
+                    if (clock_aligner_) {
+                        clock_aligner_->updateCameraTime(ts_ns, this->get_logger());
+                    }
+                    data.ts_ns = ts_ns;
+                    data.angular_vel = Eigen::Vector3d(msg->angular_velocity.x, msg->angular_velocity.y, msg->angular_velocity.z);
+                    data.linear_accel = Eigen::Vector3d(msg->linear_acceleration.x, msg->linear_acceleration.y, msg->linear_acceleration.z);
+                    imu_interpolator_->addImuData(data);
+                }
             });
     }
-
-    pub_markers_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("/perception/cones_vis", rclcpp::SensorDataQoS());
-    pub_cones_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/perception/cones", rclcpp::SensorDataQoS());
-    pub_cone_points_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/perception/cone_points", rclcpp::SensorDataQoS());
-    pub_lidar_viz_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/perception/lidar_viz", rclcpp::SensorDataQoS());
-
-    // Start background worker for visualization
-    viz_thread_ = std::thread(&PerceptionNode::visualizationWorker, this);
 }
 
-PerceptionNode::~PerceptionNode() {
-    {
-        std::lock_guard<std::mutex> lock(viz_mutex_);
-        stop_viz_thread_ = true;
-    }
-    viz_cv_.notify_all();
-    if (viz_thread_.joinable()) viz_thread_.join();
-
-    if (profiler_) {
-        profiler_->saveToJSON(json_file_path_);
-        RCLCPP_INFO(this->get_logger(), "Profiling data saved to JSON before exit.");
-    }
-    if (cluster_logger_ && !csv_file_path_.empty()) {
-        cluster_logger_->saveToCSV(csv_file_path_);
-        saveConfig(config_json_file_path_);
-        RCLCPP_INFO(this->get_logger(), "Cluster analysis data and config saved before exit.");
-    }
-}
-
-void PerceptionNode::saveConfig(const std::string& filepath) {
-    std::ofstream out(filepath);
-    if (!out.is_open()) return;
-
-    auto params = this->get_parameters(this->list_parameters({}, 0).names);
-    
-    out << "{\n";
-    for (size_t i = 0; i < params.size(); ++i) {
-        out << "  \"" << params[i].get_name() << "\": ";
-        if (params[i].get_type() == rclcpp::ParameterType::PARAMETER_STRING) {
-            out << "\"" << params[i].as_string() << "\"";
-        } else if (params[i].get_type() == rclcpp::ParameterType::PARAMETER_DOUBLE) {
-            out << params[i].as_double();
-        } else if (params[i].get_type() == rclcpp::ParameterType::PARAMETER_INTEGER) {
-            out << params[i].as_int();
-        } else if (params[i].get_type() == rclcpp::ParameterType::PARAMETER_BOOL) {
-            out << (params[i].as_bool() ? "true" : "false");
-        } else if (params[i].get_type() == rclcpp::ParameterType::PARAMETER_DOUBLE_ARRAY) {
-            out << "[";
-            auto arr = params[i].as_double_array();
-            for (size_t j = 0; j < arr.size(); ++j) {
-                out << arr[j] << (j < arr.size() - 1 ? ", " : "");
-            }
-            out << "]";
-        } else {
-            out << "null";
-        }
-        out << (i < params.size() - 1 ? ",\n" : "\n");
-    }
-    out << "}\n";
-    out.close();
-}
+// ============================================================================
+// MAIN PROCESSING PIPELINE
+// ============================================================================
 
 void PerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPtr msg) {
     if (!msg) return;
@@ -330,25 +365,173 @@ void PerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPtr msg
     frame_counter_++;
     if (profiler_) profiler_->startFrame();
 
-    /**
-     * @phase Data Conversion
-     * Transformation of the incoming ROS 2 message into a PCL-compatible format.
-     */
+    // Align LiDAR raw hardware timestamps with PC / dynamic TF clocks domain to prevent TF_OLD_DATA
+    if (clock_aligner_) {
+        uint64_t target_ts_ns = rclcpp::Time(msg->header.stamp).nanoseconds();
+        clock_aligner_->updateLidarTime(target_ts_ns, this->get_logger());
+        uint64_t target_ts_aligned_ns = clock_aligner_->alignTimestamp(target_ts_ns);
+        msg->header.stamp = rclcpp::Time(static_cast<int64_t>(target_ts_aligned_ns));
+    }
+
+    RCLCPP_INFO_ONCE(this->get_logger(), "LiDAR message frame_id: %s", msg->header.frame_id.c_str());
+
+    // 1. Data Conversion and Robust Point Timestamping
+    if (!convertAndPreprocess(msg)) return;
+
+    PointCloudPtr processing_cloud = raw_cloud_ptr_;
+
+    if (profiler_) profiler_->stopTimer("conversion");
+
+    if (processing_cloud->empty()) return;
+
+    // 2. Motion Compensation (Deskewing)
+    performDeskewing(msg, processing_cloud);
+
+    // 3. Optional Voxel Grid Downsampling
+    if (processing_cloud->size() > 500) {
+        if (profiler_) profiler_->startTimer("conversion");
+        pcl::VoxelGrid<PointT> early_vg;
+        early_vg.setInputCloud(processing_cloud);
+        double v_size = this->get_parameter("voxel_size").as_double();
+        early_vg.setLeafSize(v_size, v_size, v_size);
+        early_vg.filter(*filtered_cloud_ptr_);
+        
+        processing_cloud = filtered_cloud_ptr_; 
+
+        // Publish lightweight original cloud for visualization at FULL frequency only in debug mode
+        if (debug_mode_) {
+            auto viz_msg = std::make_unique<sensor_msgs::msg::PointCloud2>();
+            pcl::toROSMsg(*filtered_cloud_ptr_, *viz_msg);
+            viz_msg->header = msg->header;
+            pub_lidar_viz_->publish(std::move(viz_msg));
+        }
+        if (profiler_) profiler_->stopTimer("conversion");
+    }
+
+    // 4. Ground Removal
+    if (!ground_remover_) return;
+    if (profiler_) profiler_->startTimer("ground_removal");
+    
+    obstacles_str_->clear();
+    ground_str_->clear();
+    ground_remover_->removeGround(processing_cloud, obstacles_str_, ground_str_);
+
+    if (profiler_) profiler_->stopTimer("ground_removal");
+    
+    // 5. Object Clustering and Volume Merging
+    std::vector<PointCloudPtr> merged_clusters;
+    performClusteringAndMerging(obstacles_str_, merged_clusters);
+
+    // 6. Volumetric Classification (Estimation)
+    std::vector<Cone> candidate_cones;
+    estimateCones(merged_clusters, candidate_cones);
+    
+    // 7. Non-Maximum Suppression (Duplicate Aggregation)
+    std::vector<Cone> final_cones;
+    aggregateDuplicates(candidate_cones, final_cones);
+
+    // 8. Handover data asynchronously to visualization thread
+    handoverToVisualization(msg, processing_cloud, merged_clusters, final_cones);
+
+    // Pipeline Diagnostic Logging
+    RCLCPP_INFO(this->get_logger(), 
+        "Pipeline Diagnostic | Raw Points: %zu | Obstacles: %zu | Merged Clusters: %zu | Candidates: %zu | Final Cones: %zu",
+        raw_cloud_ptr_->size(), obstacles_str_->size(), merged_clusters.size(), candidate_cones.size(), final_cones.size());
+
+    // 9. Frame statistics and budget violations checks
+    if (profiler_) {
+        profiler_->endFrame(final_cones.size());
+
+        if (frame_counter_ % 1 == 0) {
+            auto total_ms = profiler_->getLastFrameTotalMs();
+            RCLCPP_INFO(this->get_logger(), "Frame: %d | Latency: %.2f ms | Cones Detected: %zu", 
+                frame_counter_, total_ms, final_cones.size());
+            if (total_ms > 20.0) {
+                RCLCPP_WARN(this->get_logger(), "Performance Violation: Frame latency (%.2f ms) exceeds 20ms real-time budget.", total_ms);
+            }
+        }
+    }
+}
+
+// ============================================================================
+// PIPELINE STAGE IMPLEMENTATIONS
+// ============================================================================
+
+bool PerceptionNode::convertAndPreprocess(const sensor_msgs::msg::PointCloud2::SharedPtr& msg) {
     if (profiler_) profiler_->startTimer("conversion");
     
-    // Always use the persistent input buffer for ROS conversion
     try {
         pcl::fromROSMsg(*msg, *raw_cloud_ptr_);
     } catch (const std::exception& e) {
         RCLCPP_ERROR(this->get_logger(), "ROS-to-PCL conversion failure: %s", e.what());
         if (profiler_) profiler_->stopTimer("conversion");
-        return;
+        return false;
     }
     
     if (raw_cloud_ptr_->empty()) {
         RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 5000, "Received null or empty point cloud.");
         if (profiler_) profiler_->stopTimer("conversion");
-        return;
+        return false;
+    }
+
+    // Robust individual point timestamp extraction (multi-field search matching deskew_engine.cpp)
+    int ts_offset = -1;
+    uint8_t ts_datatype = 0;
+    for (const auto& field : msg->fields) {
+        if (field.name == "timestamp" || field.name == "time" || field.name == "t") {
+            ts_offset = field.offset;
+            ts_datatype = field.datatype;
+            break;
+        }
+    }
+    
+    uint64_t target_ts_ns = rclcpp::Time(msg->header.stamp).nanoseconds();
+    if (ts_offset >= 0) {
+        int points_num = raw_cloud_ptr_->points.size();
+        const uint8_t* raw_data_ptr = msg->data.data();
+        
+        #pragma omp parallel for schedule(static)
+        for (int i = 0; i < points_num; ++i) {
+            auto& p = raw_cloud_ptr_->points[i];
+            const uint8_t* pt_raw = raw_data_ptr + i * msg->point_step;
+            double pt_time = 0.0;
+            if (ts_datatype == sensor_msgs::msg::PointField::FLOAT32) {
+                pt_time = static_cast<double>(*reinterpret_cast<const float*>(pt_raw + ts_offset));
+            } else if (ts_datatype == sensor_msgs::msg::PointField::FLOAT64) {
+                pt_time = *reinterpret_cast<const double*>(pt_raw + ts_offset);
+            } else if (ts_datatype == sensor_msgs::msg::PointField::UINT32) {
+                pt_time = static_cast<double>(*reinterpret_cast<const uint32_t*>(pt_raw + ts_offset));
+            }
+            
+            // Convert pt_time to absolute timestamp in seconds
+            double pt_abs_sec = 0.0;
+            if (pt_time > 1e9) {
+                if (pt_time > 1e15) {
+                    pt_abs_sec = pt_time / 1e9; // nanoseconds to seconds
+                } else {
+                    pt_abs_sec = pt_time;       // seconds
+                }
+                
+                // Align raw absolute point timestamp to system/TF clock domain
+                if (clock_aligner_) {
+                    uint64_t pt_abs_ns = static_cast<uint64_t>(pt_abs_sec * 1e9);
+                    uint64_t pt_aligned_ns = clock_aligner_->alignTimestamp(pt_abs_ns);
+                    pt_abs_sec = static_cast<double>(pt_aligned_ns) / 1e9;
+                }
+            } else {
+                // target_ts_ns is already in system/aligned clock domain
+                pt_abs_sec = (static_cast<double>(target_ts_ns) / 1e9) + pt_time; // relative offset
+            }
+            p.timestamp = pt_abs_sec;
+        }
+    } else {
+        // Fallback: set all point timestamps to the aligned frame stamp in seconds
+        double target_ts_sec = static_cast<double>(target_ts_ns) / 1e9;
+        int points_num = raw_cloud_ptr_->points.size();
+        #pragma omp parallel for schedule(static)
+        for (int i = 0; i < points_num; ++i) {
+            raw_cloud_ptr_->points[i].timestamp = target_ts_sec;
+        }
     }
 
     preProcess(raw_cloud_ptr_);
@@ -358,65 +541,72 @@ void PerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPtr msg
     for (auto& pt : raw_cloud_ptr_->points) {
         float r2 = pt.x*pt.x + pt.y*pt.y + pt.z*pt.z;
         if (r2 > 1.0f) {
-            float factor = r2 * REF_DIST_SQ_INV;
+            float factor = std::max(1.0f, r2 * REF_DIST_SQ_INV);
             pt.intensity = std::min(255.0f, pt.intensity * factor); 
         }
     }
 
-    // Pointer to the cloud we will actually process (start with raw)
-    PointCloudPtr processing_cloud = raw_cloud_ptr_;
+    return true;
+}
 
-    if (raw_cloud_ptr_->size() > 500) {
-        pcl::VoxelGrid<PointT> early_vg;
-        early_vg.setInputCloud(raw_cloud_ptr_);
-        double v_size = this->get_parameter("voxel_size").as_double();
-        early_vg.setLeafSize(v_size, v_size, v_size);
-        early_vg.filter(*filtered_cloud_ptr_);
-        
-        // Switch to the filtered cloud for the rest of the pipeline
-        processing_cloud = filtered_cloud_ptr_; 
-
-        // Publish a lightweight version for Foxglove/RViz at FULL frequency
-        auto viz_msg = std::make_unique<sensor_msgs::msg::PointCloud2>();
-        pcl::toROSMsg(*filtered_cloud_ptr_, *viz_msg);
-        viz_msg->header = msg->header;
-        pub_lidar_viz_->publish(std::move(viz_msg));
-        }
-
-    if (profiler_) profiler_->stopTimer("conversion");
-
-    if (processing_cloud->empty()) return;
-
-    /**
-     * @phase Motion Compensation
-     */
-    if (this->get_parameter("use_deskewing").as_bool() && deskewer_) {
+void PerceptionNode::performDeskewing(const sensor_msgs::msg::PointCloud2::SharedPtr& msg, PointCloudPtr& processing_cloud) {
+    if (this->get_parameter("use_deskewing").as_bool() && tf_manager_ && imu_interpolator_) {
         if (profiler_) profiler_->startTimer("deskewing");
-        if (!deskewer_->deskew(processing_cloud)) {
-            RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000, 
-                "Deskewing operation postponed (awaiting IMU synchronization).");
+
+        // 1. Inject static transforms dynamically
+        tf_manager_->injectStaticTFs(msg->header.stamp, msg->header.frame_id);
+
+        uint64_t target_ts_ns = rclcpp::Time(msg->header.stamp).nanoseconds();
+
+        // 2. Lookup coordinate transforms and estimate base link linear velocity
+        std::string world_frame = tf_manager_->getTfBuffer()->_frameExists("odom") ? "odom" : "map";
+        Eigen::Vector3d v_world = tf_manager_->estimateLinearVelocity(target_ts_ns, world_frame, "zed_camera_link");
+        Eigen::Matrix4d T_w_cl = tf_manager_->lookupTransformSafe(world_frame, "zed_camera_link", target_ts_ns);
+        Eigen::Matrix3d R_w_cl = T_w_cl.block<3, 3>(0, 0);
+        Eigen::Vector3d v_cl = R_w_cl.transpose() * v_world;
+
+        Eigen::Matrix4d T_cl_l = tf_manager_->lookupTransformSafe("zed_camera_link", msg->header.frame_id, target_ts_ns);
+        Eigen::Matrix3d R_cl_l = T_cl_l.block<3, 3>(0, 0);
+        Eigen::Vector3d t_cl_l = T_cl_l.block<3, 1>(0, 3);
+
+        // 3. Perform high-precision parallel point-by-point motion compensation
+        int points_num = processing_cloud->points.size();
+
+        #pragma omp parallel for schedule(static)
+        for (int i = 0; i < points_num; ++i) {
+            auto& p = processing_cloud->points[i];
+            if (!std::isfinite(p.x) || !std::isfinite(p.y) || !std::isfinite(p.z)) continue;
+
+            uint64_t pt_ts_ns = static_cast<uint64_t>(p.timestamp * 1e9);
+            double dt = (static_cast<double>(pt_ts_ns) - static_cast<double>(target_ts_ns)) / 1e9;
+
+            Eigen::Vector3d p_l(p.x, p.y, p.z);
+            Eigen::Vector3d p_cl = R_cl_l * p_l + t_cl_l;
+
+            Eigen::Vector3d omega_lidar = imu_interpolator_->getInterpolatedAngularVel(pt_ts_ns);
+            Eigen::Vector3d omega_cl = omega_lidar;
+
+            double theta = dt * omega_cl.norm();
+            Eigen::Vector3d p_rotated = p_cl;
+            if (theta > 1e-6) {
+                Eigen::Vector3d axis = omega_cl.normalized();
+                p_rotated = p_cl * std::cos(theta) + axis.cross(p_cl) * std::sin(theta) +
+                            axis * axis.dot(p_cl) * (1.0 - std::cos(theta));
+            }
+
+            Eigen::Vector3d p_deskewed_cl = p_rotated + dt * v_cl;
+            Eigen::Vector3d p_deskewed_l = R_cl_l.transpose() * (p_deskewed_cl - t_cl_l);
+
+            p.x = p_deskewed_l.x();
+            p.y = p_deskewed_l.y();
+            p.z = p_deskewed_l.z();
         }
+
         if (profiler_) profiler_->stopTimer("deskewing");
     }
+}
 
-    /**
-     * @phase Ground Removal
-     */
-    if (!ground_remover_) return;
-
-    if (profiler_) profiler_->startTimer("ground_removal");
-    
-    obstacles_str_->clear();
-    ground_str_->clear();
-
-    ground_remover_->removeGround(processing_cloud, obstacles_str_, ground_str_);
-
-    if (profiler_) profiler_->stopTimer("ground_removal");
-    
-    /**
-     * @phase Object Clustering
-     * Identification of discrete point clusters using the configured spatial partitioning strategy.
-     */
+void PerceptionNode::performClusteringAndMerging(const PointCloudPtr& obstacles_cloud, std::vector<PointCloudPtr>& merged_clusters) {
     if (!clusterer_) {
         RCLCPP_ERROR_ONCE(this->get_logger(), "Clustering interface not initialized.");
         return;
@@ -424,15 +614,10 @@ void PerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPtr msg
 
     if (profiler_) profiler_->startTimer("clustering");
     std::vector<PointCloudPtr> clusters;
-    clusterer_->cluster(obstacles_str_, clusters);
+    clusterer_->cluster(obstacles_cloud, clusters);
     if (profiler_) profiler_->stopTimer("clustering");
 
-    /**
-     * @phase Cluster Merging
-     */
     if (profiler_) profiler_->startTimer("merging");
-    std::vector<PointCloudPtr> merged_clusters;
-    
     std::vector<PointCloudPtr> valid_candidates;
     valid_candidates.reserve(clusters.size());
     int min_cluster = this->get_parameter("min_cluster_size").as_int();
@@ -464,7 +649,6 @@ void PerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPtr msg
 
             if (dx*dx + dy*dy < MERGE_DIST_SQ) {
                 if (!has_merged) {
-                    // Only copy if we are actually merging
                     current_cloud.reset(new PointCloud(*valid_candidates[i]));
                     has_merged = true;
                 }
@@ -475,31 +659,25 @@ void PerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPtr msg
         merged_clusters.push_back(current_cloud);
     }
     if (profiler_) profiler_->stopTimer("merging");
+}
 
-    /**
-     * @phase Feature Extraction and Estimation
-     * Statistical classification of clusters using PCA-derived features and geometric constraints.
-     */
+void PerceptionNode::estimateCones(const std::vector<PointCloudPtr>& merged_clusters, std::vector<Cone>& candidate_cones) {
     if (!estimator_) {
         RCLCPP_ERROR_ONCE(this->get_logger(), "Estimation engine not initialized.");
         return;
     }
 
     if (profiler_) profiler_->startTimer("estimation");
-    std::vector<Cone> candidate_cones;
-
     for (size_t i = 0; i < merged_clusters.size(); ++i) {
         auto cone = estimator_->estimate(merged_clusters[i]);
         
         // Log cluster features if logging is enabled
         if (cluster_logger_) {
             if (this->get_parameter("log_all_clusters").as_bool()) {
-                // Log everything to analyze rejected clusters
                 cone.features.frame_id = frame_counter_;
                 cone.features.cluster_id = static_cast<int>(i);
                 cluster_logger_->addCluster(cone.features);
             } else if (cone.confidence > 0.5f) {
-                // Log only successful detections (default)
                 cone.features.frame_id = frame_counter_;
                 cone.features.cluster_id = static_cast<int>(i);
                 cluster_logger_->addCluster(cone.features);
@@ -511,16 +689,12 @@ void PerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPtr msg
         }
     }
     if (profiler_) profiler_->stopTimer("estimation");
-    
-    /**
-     * @phase Weighted Spatial Aggregation
-     * Non-maximum suppression with spatial averaging to eliminate redundant 
-     * detections and smooth the reported position.
-     */
+}
+
+void PerceptionNode::aggregateDuplicates(const std::vector<Cone>& candidate_cones, std::vector<Cone>& final_cones) {
     if (profiler_) profiler_->startTimer("duplicate");
     const float tracking_match_dist = static_cast<float>(this->get_parameter("tracking_match_dist").as_double());
     const float MIN_DIST_SQ = tracking_match_dist * tracking_match_dist; 
-    std::vector<Cone> final_cones;
     std::vector<bool> candidate_merged(candidate_cones.size(), false);
 
     for (size_t i = 0; i < candidate_cones.size(); ++i) {
@@ -554,28 +728,39 @@ void PerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPtr msg
             aggregated.range = std::sqrt(aggregated.x*aggregated.x + aggregated.y*aggregated.y);
             aggregated.bearing = std::atan2(aggregated.y, aggregated.x);
         }
+        
         final_cones.push_back(aggregated);
     }
     if (profiler_) profiler_->stopTimer("duplicate");
+}
 
-    /**
-     * @phase Asynchronous Handover
-     * Transfer processed data to the visualization worker thread and return control 
-     * to the main callback immediately.
-     */
-    {
-        std::lock_guard<std::mutex> lock(viz_mutex_);
-        auto viz_data = std::make_unique<VizData>();
-        viz_data->header = msg->header;
-        
-        // Data snapshots to avoid race conditions
+void PerceptionNode::handoverToVisualization(const sensor_msgs::msg::PointCloud2::SharedPtr& msg, const PointCloudPtr& processing_cloud, const std::vector<PointCloudPtr>& merged_clusters, const std::vector<Cone>& final_cones) {
+    std::lock_guard<std::mutex> lock(viz_mutex_);
+    auto viz_data = std::make_unique<VizData>();
+    viz_data->header = msg->header;
+    
+    // Take snapshots of data to completely avoid thread race conditions
+    if (debug_mode_) {
         viz_data->cloud_viz.reset(new PointCloud(*processing_cloud));
-        viz_data->cones_cloud.reset(new PointCloud);
-        viz_data->cones_cloud->reserve(final_cones.size());
-        viz_data->cone_points.reset(new PointCloud);
-        viz_data->cone_points->reserve(final_cones.size() * 30);
-        
-        // Marker generation
+    }
+    viz_data->cones_cloud.reset(new PointCloud);
+    viz_data->cones_cloud->reserve(final_cones.size());
+    viz_data->cone_points.reset(new PointCloud);
+    viz_data->cone_points->reserve(final_cones.size() * 30);
+    
+    // Populate obstacles_cloud with the union of all merged clusters for the fusion node
+    viz_data->obstacles_cloud.reset(new PointCloud);
+    size_t total_points = 0;
+    for (const auto& cluster : merged_clusters) {
+        total_points += cluster->size();
+    }
+    viz_data->obstacles_cloud->reserve(total_points);
+    for (const auto& cluster : merged_clusters) {
+        *(viz_data->obstacles_cloud) += *cluster;
+    }
+    
+    // Populate visualization MarkerArray only if in debug mode
+    if (debug_mode_) {
         auto markers = std::make_unique<visualization_msgs::msg::MarkerArray>();
         markers->markers.reserve(final_cones.size() * 2 + 2);
 
@@ -608,7 +793,7 @@ void PerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPtr msg
 
         int id_counter = 1;
         for (const auto& cone : final_cones) {
-            // Cone Marker
+            // 3D Cone Marker
             cone_template.id = id_counter;
             cone_template.pose.position.x = cone.x;
             cone_template.pose.position.y = cone.y;
@@ -624,7 +809,7 @@ void PerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPtr msg
             }
             markers->markers.push_back(cone_template);
 
-            // Text Label
+            // Distance Text Label Marker
             text_template.id = id_counter++;
             text_template.pose.position.x = cone.x;
             text_template.pose.position.y = cone.y;
@@ -633,37 +818,29 @@ void PerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPtr msg
             snprintf(dist_str, sizeof(dist_str), "%.1fm", cone.range);
             text_template.text = dist_str;
             markers->markers.push_back(text_template);
-
-            // PointCloud Data
-            PointT p_out;
-            p_out.x = cone.x; p_out.y = cone.y; p_out.z = cone.z;
-            p_out.intensity = cone.range; // Carry radial range as per fusion_integration.md
-            viz_data->cones_cloud->push_back(p_out);
-            
-            if (cone.cloud) {
-                *(viz_data->cone_points) += *cone.cloud;
-            }
         }
         viz_data->markers = std::move(markers);
-        viz_queue_.push_back(std::move(viz_data));
-        
-        // Safety cap to prevent memory leak if publishers are stuck
-        if (viz_queue_.size() > 100) viz_queue_.pop_front();
     }
-    viz_cv_.notify_one();
 
-    if (profiler_) {
-        profiler_->endFrame(final_cones.size());
-
-        if (frame_counter_ % 1 == 0) {
-            auto total_ms = profiler_->getLastFrameTotalMs();
-            RCLCPP_INFO(this->get_logger(), "Frame: %d | Latency: %.2f ms | Cones Detected: %zu", 
-                frame_counter_, total_ms, final_cones.size());
-            if (total_ms > 20.0) {
-                RCLCPP_WARN(this->get_logger(), "Performance Violation: Frame latency (%.2f ms) exceeds 20ms real-time budget.", total_ms);
-            }
+    // Always populate the essential point clouds for the fusion node
+    for (const auto& cone : final_cones) {
+        // Centroid PointCloud Point
+        PointT p_out;
+        p_out.x = cone.x; p_out.y = cone.y; p_out.z = cone.z;
+        p_out.intensity = cone.range; // Carry radial range as per fusion_integration.md
+        viz_data->cones_cloud->push_back(p_out);
+        
+        // Accumulate raw points belonging to this validated cone
+        if (cone.cloud) {
+            *(viz_data->cone_points) += *cone.cloud;
         }
     }
+    
+    viz_queue_.push_back(std::move(viz_data));
+    
+    // Safety cap to prevent memory leak if publishers are stuck
+    if (viz_queue_.size() > 100) viz_queue_.pop_front();
+    viz_cv_.notify_one();
 }
 
 void PerceptionNode::visualizationWorker() {
@@ -683,20 +860,20 @@ void PerceptionNode::visualizationWorker() {
 
         if (!data) continue;
 
-        // 1. Markers
-        if (data->markers) {
+        // 1. Markers (only when in debug mode)
+        if (data->markers && debug_mode_) {
             pub_markers_->publish(std::move(data->markers));
         }
 
-        // 2. Lidar Viz
-        if (data->cloud_viz) {
+        // 2. Lidar Viz (only when in debug mode)
+        if (data->cloud_viz && debug_mode_) {
             auto msg = std::make_unique<sensor_msgs::msg::PointCloud2>();
             pcl::toROSMsg(*(data->cloud_viz), *msg);
             msg->header = data->header;
             pub_lidar_viz_->publish(std::move(msg));
         }
 
-        // 3. Cones
+        // 3. Cones (Centroids) - Always published for fusion node
         if (data->cones_cloud) {
             auto msg = std::make_unique<sensor_msgs::msg::PointCloud2>();
             pcl::toROSMsg(*(data->cones_cloud), *msg);
@@ -704,12 +881,20 @@ void PerceptionNode::visualizationWorker() {
             pub_cones_->publish(std::move(msg));
         }
 
-        // 4. Cone Points
+        // 4. Cone Points (Volumetric data) - Always published for fusion node
         if (data->cone_points) {
             auto msg = std::make_unique<sensor_msgs::msg::PointCloud2>();
             pcl::toROSMsg(*(data->cone_points), *msg);
             msg->header = data->header;
             pub_cone_points_->publish(std::move(msg));
+        }
+
+        // 5. Obstacles (Ground-removed & Deskewed) - Always published for fusion node
+        if (data->obstacles_cloud) {
+            auto msg = std::make_unique<sensor_msgs::msg::PointCloud2>();
+            pcl::toROSMsg(*(data->obstacles_cloud), *msg);
+            msg->header = data->header;
+            pub_obstacles_->publish(std::move(msg));
         }
     }
 }
@@ -717,11 +902,6 @@ void PerceptionNode::visualizationWorker() {
 void PerceptionNode::preProcess(const PointCloudPtr& cloud) {
     if (cloud->empty()) return;
 
-    /**
-     * @details Implements a rapid spatial filter to prune points outside the 
-     * operational region of interest. Distances are evaluated as squared values 
-     * to circumvent costly square-root operations.
-     */
     const float max_range = static_cast<float>(this->get_parameter("max_range").as_double());
     const float max_r2 = max_range * max_range;
     const float min_r2 = 0.25f * 0.25f; // Internal occlusion / sensor blind spot
@@ -741,11 +921,6 @@ void PerceptionNode::preProcess(const PointCloudPtr& cloud) {
 
 } // namespace lidar_perception
 
-/**
- * @brief Main execution entry point.
- * 
- * Initializes the ROS 2 middleware and instantiates the perception controller.
- */
 int main(int argc, char **argv) {
     rclcpp::init(argc, argv);
     auto node = std::make_shared<lidar_perception::PerceptionNode>();
