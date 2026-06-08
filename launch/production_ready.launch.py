@@ -72,20 +72,27 @@ def generate_launch_description():
     # --- 6. POST-PROCESSING & DESKEWING ---
     merge_dist_arg = DeclareLaunchArgument('merge_dist', default_value='0.25')
     tracking_match_dist_arg = DeclareLaunchArgument('tracking_match_dist', default_value='0.45')
-    use_deskew_arg = DeclareLaunchArgument('use_deskewing', default_value='true')
     imu_topic_arg = DeclareLaunchArgument('imu_topic', default_value='/zed/zed_node/imu/data')
     deskew_trans_arg = DeclareLaunchArgument('deskew_use_translation', default_value='true')
-    roll_arg = DeclareLaunchArgument(
-        'roll', default_value='-0.4',
+    roll_deg_arg = DeclareLaunchArgument(
+        'roll_deg', default_value='-0.4',
         description='Fine-tune roll correction for extrinsic rotation in degrees'
     )
-    pitch_arg = DeclareLaunchArgument(
-        'pitch', default_value='0.0',
+    pitch_deg_arg = DeclareLaunchArgument(
+        'pitch_deg', default_value='0.0',
         description='Fine-tune pitch correction for extrinsic rotation in degrees'
     )
-    yaw_arg = DeclareLaunchArgument(
-        'yaw', default_value='0.0',
+    yaw_deg_arg = DeclareLaunchArgument(
+        'yaw_deg', default_value='0.0',
         description='Fine-tune yaw correction for extrinsic rotation in degrees'
+    )
+    imu_frame_arg = DeclareLaunchArgument(
+        'imu_frame', default_value='zed_imu_link',
+        description='IMU frame ID for deskewing lever arm (typically zed_imu_link)'
+    )
+    world_up_axis_arg = DeclareLaunchArgument(
+        'world_up_axis', default_value='y',
+        description='World frame up-axis ("y" or "z")'
     )
     use_vox_filt_arg = DeclareLaunchArgument('use_voxel_filter', default_value='false')
     vox_size_arg = DeclareLaunchArgument('voxel_size', default_value='0.02')
@@ -151,14 +158,15 @@ def generate_launch_description():
             'rule_min_intensity': LaunchConfiguration('rule_min_intensity'),
             'merge_dist': LaunchConfiguration('merge_dist'),
             'tracking_match_dist': LaunchConfiguration('tracking_match_dist'),
-            'use_deskewing': LaunchConfiguration('use_deskewing'),
             'imu_topic': LaunchConfiguration('imu_topic'),
+            'imu_frame': LaunchConfiguration('imu_frame'),
+            'world_up_axis': LaunchConfiguration('world_up_axis'),
             'deskew_use_translation': LaunchConfiguration('deskew_use_translation'),
-            'roll': LaunchConfiguration('roll'),
-            'pitch': LaunchConfiguration('pitch'),
-            'yaw': LaunchConfiguration('yaw'),
+            'roll_deg': LaunchConfiguration('roll_deg'),
+            'pitch_deg': LaunchConfiguration('pitch_deg'),
+            'yaw_deg': LaunchConfiguration('yaw_deg'),
             'extrinsic_rotation': [0.999743, 0.0226629, 7.2829e-10, 8.06016e-10, -3.42052e-09, -1.0, -0.0226629, 0.999743, -3.43791e-09],
-            'extrinsic_translation': [0.0498833, -0.10403, -0.0324321],
+            'extrinsic_translation': [0.0543494, -0.0235914, -0.0488917],
             'use_voxel_filter': LaunchConfiguration('use_voxel_filter'),
             'voxel_size': LaunchConfiguration('voxel_size'),
             'log_dir': LaunchConfiguration('log_dir'),
@@ -214,12 +222,13 @@ def generate_launch_description():
         rule_decay_arg,
         rule_pts_arg,
         rule_int_arg,
-        use_deskew_arg,
         imu_topic_arg,
         deskew_trans_arg,
-        roll_arg,
-        pitch_arg,
-        yaw_arg,
+        roll_deg_arg,
+        pitch_deg_arg,
+        yaw_deg_arg,
+        imu_frame_arg,
+        world_up_axis_arg,
         use_vox_filt_arg,
         vox_size_arg,
         log_dir_arg,

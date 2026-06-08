@@ -33,7 +33,6 @@
 #include "utils/performance_profiler.hpp"
 #include "utils/transform_manager.hpp"
 #include "utils/imu_interpolator.hpp"
-#include "utils/deskew_engine.hpp"
 #include "utils/cluster_logger.hpp"
 #include "utils/clock_aligner.hpp"
 
@@ -160,8 +159,9 @@ private:
     std::unique_ptr<ConeEstimator> estimator_;               ///< Geometric object classification engine.
     std::unique_ptr<fs_fusion::TransformManager> tf_manager_;
     std::unique_ptr<fs_fusion::ImuInterpolator> imu_interpolator_;
-    std::unique_ptr<fs_fusion::DeskewEngine> deskew_engine_;
     std::unique_ptr<fs_fusion::ClockAligner> clock_aligner_;
+    
+    Eigen::Vector3d g_world_; ///< World gravity vector.
     
     // Benchmarking and diagnostics
     std::unique_ptr<PerformanceProfiler> profiler_; ///< Real-time latency tracking.

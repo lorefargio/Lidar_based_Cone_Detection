@@ -1,4 +1,5 @@
 #include "node/perception_node.hpp"
+#include <rcl_interfaces/msg/parameter_descriptor.hpp>
 
 #include <pcl/pcl_base.h>
 #include <pcl/impl/pcl_base.hpp>
@@ -315,25 +316,58 @@ void PerceptionNode::initializeEstimator() {
 void PerceptionNode::initializeDeskewing() {
     this->declare_parameter<bool>("use_deskewing", true);
     this->declare_parameter<std::string>("imu_topic", "/zed/zed_node/imu/data");
+    this->declare_parameter<std::string>("imu_frame", "zed_imu_link");
+    this->declare_parameter<double>("imu_lowpass_cutoff", 30.0);
     this->declare_parameter<std::vector<double>>("extrinsic_rotation", {0.999743, 0.0226629, 7.2829e-10, 8.06016e-10, -3.42052e-09, -1.0, -0.0226629, 0.999743, -3.43791e-09});
-    this->declare_parameter<std::vector<double>>("extrinsic_translation", {0.0498833, -0.10403, -0.0324321});
-    this->declare_parameter<double>("roll", -0.4);
-    this->declare_parameter<double>("pitch", 0.0);
-    this->declare_parameter<double>("yaw", 0.0);
+    this->declare_parameter<std::vector<double>>("extrinsic_translation", {0.0543494, -0.0235914, -0.0488917});
+    this->declare_parameter<double>("roll_deg", -0.4);
+    this->declare_parameter<double>("pitch_deg", 0.0);
+    this->declare_parameter<double>("yaw_deg", 0.0);
+    rcl_interfaces::msg::ParameterDescriptor world_up_axis_desc;
+    world_up_axis_desc.dynamic_typing = true;
+    this->declare_parameter("world_up_axis", rclcpp::ParameterValue(std::string("y")), world_up_axis_desc);
 
     clock_aligner_ = std::make_unique<fs_fusion::ClockAligner>();
 
     if (this->get_parameter("use_deskewing").as_bool()) {
+        std::string world_up_axis;
+        auto world_up_axis_param = this->get_parameter("world_up_axis");
+        if (world_up_axis_param.get_type() == rclcpp::ParameterType::PARAMETER_BOOL) {
+            world_up_axis = world_up_axis_param.as_bool() ? "y" : "n";
+        } else if (world_up_axis_param.get_type() == rclcpp::ParameterType::PARAMETER_STRING) {
+            world_up_axis = world_up_axis_param.as_string();
+        } else {
+            throw std::runtime_error("Invalid parameter type for 'world_up_axis'. Must be string or boolean.");
+        }
+
+        if (world_up_axis == "y") {
+            g_world_ = Eigen::Vector3d(0.0, -9.80665, 0.0);
+        } else if (world_up_axis == "z") {
+            g_world_ = Eigen::Vector3d(0.0, 0.0, -9.80665);
+        } else {
+            throw std::runtime_error("Invalid world_up_axis value: '" + world_up_axis + "'. Must be 'y' or 'z'.");
+        }
+        RCLCPP_INFO(this->get_logger(), "World up axis parameter configured: '%s'. g_world: [%.5f, %.5f, %.5f]", 
+                    world_up_axis.c_str(), g_world_.x(), g_world_.y(), g_world_.z());
+
         auto rot = this->get_parameter("extrinsic_rotation").as_double_array();
         auto trans = this->get_parameter("extrinsic_translation").as_double_array();
-        double r = this->get_parameter("roll").as_double();
-        double p = this->get_parameter("pitch").as_double();
-        double y = this->get_parameter("yaw").as_double();
+        double r_deg = this->get_parameter("roll_deg").as_double();
+        double p_deg = this->get_parameter("pitch_deg").as_double();
+        double y_deg = this->get_parameter("yaw_deg").as_double();
+
+        // Print raw radian value and its degree equivalent for human verification at startup
+        double r_rad = r_deg * M_PI / 180.0;
+        double p_rad = p_deg * M_PI / 180.0;
+        double y_rad = y_deg * M_PI / 180.0;
+        RCLCPP_INFO(this->get_logger(), 
+            "Extrinsic calibration offsets: roll_deg = %.4f (%.4f rad), pitch_deg = %.4f (%.4f rad), yaw_deg = %.4f (%.4f rad)",
+            r_deg, r_rad, p_deg, p_rad, y_deg, y_rad);
 
         tf_manager_ = std::make_unique<fs_fusion::TransformManager>(
-            this->get_clock(), rot, trans, r, p, y);
+            this->get_clock(), rot, trans, r_deg, p_deg, y_deg);
         imu_interpolator_ = std::make_unique<fs_fusion::ImuInterpolator>();
-        deskew_engine_ = std::make_unique<fs_fusion::DeskewEngine>();
+        imu_interpolator_->setLowPassCutoff(this->get_parameter("imu_lowpass_cutoff").as_double());
         
         RCLCPP_INFO(this->get_logger(), "High-Precision Dynamic Deskewing: ENABLED");
 
@@ -365,10 +399,11 @@ void PerceptionNode::callback(const sensor_msgs::msg::PointCloud2::SharedPtr msg
     frame_counter_++;
     if (profiler_) profiler_->startFrame();
 
-    // Align LiDAR raw hardware timestamps with PC / dynamic TF clocks domain to prevent TF_OLD_DATA
+    // Align LiDAR raw hardware timestamps dynamically with PC / dynamic TF clocks domain using sliding-window tracking
     if (clock_aligner_) {
+        uint64_t pc_recv_ts_ns = this->get_clock()->now().nanoseconds();
         uint64_t target_ts_ns = rclcpp::Time(msg->header.stamp).nanoseconds();
-        clock_aligner_->updateLidarTime(target_ts_ns, this->get_logger());
+        clock_aligner_->updateLidarTimeDynamic(target_ts_ns, pc_recv_ts_ns);
         uint64_t target_ts_aligned_ns = clock_aligner_->alignTimestamp(target_ts_ns);
         msg->header.stamp = rclcpp::Time(static_cast<int64_t>(target_ts_aligned_ns));
     }
@@ -474,7 +509,7 @@ bool PerceptionNode::convertAndPreprocess(const sensor_msgs::msg::PointCloud2::S
         return false;
     }
 
-    // Robust individual point timestamp extraction (multi-field search matching deskew_engine.cpp)
+    // Robust individual point timestamp extraction (multi-field search matching PointCloud2 fields)
     int ts_offset = -1;
     uint8_t ts_datatype = 0;
     for (const auto& field : msg->fields) {
@@ -551,6 +586,19 @@ bool PerceptionNode::convertAndPreprocess(const sensor_msgs::msg::PointCloud2::S
 
 void PerceptionNode::performDeskewing(const sensor_msgs::msg::PointCloud2::SharedPtr& msg, PointCloudPtr& processing_cloud) {
     if (this->get_parameter("use_deskewing").as_bool() && tf_manager_ && imu_interpolator_) {
+        // Dynamic console diagnostics for Formula Student integration troubleshooting
+        if (processing_cloud->points.size() > 1 && 
+            std::abs(processing_cloud->points.front().timestamp - processing_cloud->points.back().timestamp) < 1e-6) {
+            RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 5000,
+                "DESKEWING DIAGNOSTIC | Point timestamps do not vary! Check if your LiDAR driver publishes per-point "
+                "timestamp fields ('timestamp', 'time', or 't'). CURRENTLY DESKEWING HAS NO EFFECT!");
+        }
+        if (imu_interpolator_->getCacheSize() == 0) {
+            RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 5000,
+                "DESKEWING DIAGNOSTIC | IMU interpolator cache is empty! Ensure your IMU topic '%s' is active and "
+                "publishing valid sensor_msgs/msg/Imu data.", this->get_parameter("imu_topic").as_string().c_str());
+        }
+
         if (profiler_) profiler_->startTimer("deskewing");
 
         // 1. Inject static transforms dynamically
@@ -558,18 +606,22 @@ void PerceptionNode::performDeskewing(const sensor_msgs::msg::PointCloud2::Share
 
         uint64_t target_ts_ns = rclcpp::Time(msg->header.stamp).nanoseconds();
 
-        // 2. Lookup coordinate transforms and estimate base link linear velocity
+        // 2. Lookup coordinate transforms and estimate LiDAR frame linear velocity directly
         std::string world_frame = tf_manager_->getTfBuffer()->_frameExists("odom") ? "odom" : "map";
-        Eigen::Vector3d v_world = tf_manager_->estimateLinearVelocity(target_ts_ns, world_frame, "zed_camera_link");
-        Eigen::Matrix4d T_w_cl = tf_manager_->lookupTransformSafe(world_frame, "zed_camera_link", target_ts_ns);
-        Eigen::Matrix3d R_w_cl = T_w_cl.block<3, 3>(0, 0);
-        Eigen::Vector3d v_cl = R_w_cl.transpose() * v_world;
+        Eigen::Vector3d v_world = tf_manager_->estimateLinearVelocity(target_ts_ns, world_frame, msg->header.frame_id);
+        Eigen::Matrix4d T_w_l = tf_manager_->lookupTransformSafe(world_frame, msg->header.frame_id, target_ts_ns);
+        Eigen::Matrix3d R_w_l = T_w_l.block<3, 3>(0, 0);
+        Eigen::Vector3d v_l = R_w_l.transpose() * v_world;
 
-        Eigen::Matrix4d T_cl_l = tf_manager_->lookupTransformSafe("zed_camera_link", msg->header.frame_id, target_ts_ns);
-        Eigen::Matrix3d R_cl_l = T_cl_l.block<3, 3>(0, 0);
-        Eigen::Vector3d t_cl_l = T_cl_l.block<3, 1>(0, 3);
+        // Retrieve rotation between Camera IMU frame and LiDAR frame to rotate IMU angular velocity
+        std::string imu_frame = this->get_parameter("imu_frame").as_string();
+        Eigen::Matrix4d T_im_l = tf_manager_->lookupTransformSafe(imu_frame, msg->header.frame_id, target_ts_ns);
+        Eigen::Matrix3d R_im_l = T_im_l.block<3, 3>(0, 0);
 
-        // 3. Perform high-precision parallel point-by-point motion compensation
+        // Precompute gravity vector rotated into the local LiDAR frame at the frame reference time
+        Eigen::Vector3d g_l = R_w_l.transpose() * g_world_;
+
+        // 3. Perform high-precision parallel point-by-point motion compensation in native LiDAR frame
         int points_num = processing_cloud->points.size();
 
         #pragma omp parallel for schedule(static)
@@ -580,22 +632,36 @@ void PerceptionNode::performDeskewing(const sensor_msgs::msg::PointCloud2::Share
             uint64_t pt_ts_ns = static_cast<uint64_t>(p.timestamp * 1e9);
             double dt = (static_cast<double>(pt_ts_ns) - static_cast<double>(target_ts_ns)) / 1e9;
 
+            // FIX 4: safety guard for corrupt timestamps or clock sync jumps
+            if (std::abs(dt) > 0.15) continue;
+
+            // Interpolate high-frequency camera IMU angular velocity
+            Eigen::Vector3d omega_cam = imu_interpolator_->getInterpolatedAngularVel(pt_ts_ns);
+
+            // 1. Rigorous Lever-Arm Compensation: Transform LiDAR point to Camera IMU frame
             Eigen::Vector3d p_l(p.x, p.y, p.z);
-            Eigen::Vector3d p_cl = R_cl_l * p_l + t_cl_l;
+            Eigen::Vector3d p_im = R_im_l * p_l + T_im_l.block<3, 1>(0, 3);
 
-            Eigen::Vector3d omega_lidar = imu_interpolator_->getInterpolatedAngularVel(pt_ts_ns);
-            Eigen::Vector3d omega_cl = omega_lidar;
-
-            double theta = dt * omega_cl.norm();
-            Eigen::Vector3d p_rotated = p_cl;
+            // 2. Rotate the point about the Camera IMU origin (lever-arm center of rotation)
+            Eigen::Vector3d rot_vec = dt * omega_cam;
+            double theta = rot_vec.norm();
+            Eigen::Vector3d p_im_rotated = p_im;
             if (theta > 1e-6) {
-                Eigen::Vector3d axis = omega_cl.normalized();
-                p_rotated = p_cl * std::cos(theta) + axis.cross(p_cl) * std::sin(theta) +
-                            axis * axis.dot(p_cl) * (1.0 - std::cos(theta));
+                Eigen::Vector3d axis = rot_vec.normalized();
+                p_im_rotated = p_im * std::cos(theta) + axis.cross(p_im) * std::sin(theta) +
+                               axis * axis.dot(p_im) * (1.0 - std::cos(theta));
             }
 
-            Eigen::Vector3d p_deskewed_cl = p_rotated + dt * v_cl;
-            Eigen::Vector3d p_deskewed_l = R_cl_l.transpose() * (p_deskewed_cl - t_cl_l);
+            // 3. Transform the rotated point back to the native LiDAR frame
+            Eigen::Vector3d p_rotated = R_im_l.transpose() * (p_im_rotated - T_im_l.block<3, 1>(0, 3));
+
+            // 4. Apply high-precision second-order translation correction (linear velocity + dynamic kinematic acceleration)
+            Eigen::Vector3d accel_cam = imu_interpolator_->getInterpolatedLinearAccel(pt_ts_ns);
+            // Rotate acceleration to LiDAR frame and subtract gravity along the rotated gravity vector
+            Eigen::Vector3d accel_l = R_im_l.transpose() * accel_cam;
+            accel_l -= g_l;
+
+            Eigen::Vector3d p_deskewed_l = p_rotated + dt * v_l + 0.5 * dt * dt * accel_l;
 
             p.x = p_deskewed_l.x();
             p.y = p_deskewed_l.y();
@@ -671,17 +737,11 @@ void PerceptionNode::estimateCones(const std::vector<PointCloudPtr>& merged_clus
     for (size_t i = 0; i < merged_clusters.size(); ++i) {
         auto cone = estimator_->estimate(merged_clusters[i]);
         
-        // Log cluster features if logging is enabled
+        // Log cluster features if logging is enabled (we always log all merged clusters, both accepted and rejected, for comprehensive tuning)
         if (cluster_logger_) {
-            if (this->get_parameter("log_all_clusters").as_bool()) {
-                cone.features.frame_id = frame_counter_;
-                cone.features.cluster_id = static_cast<int>(i);
-                cluster_logger_->addCluster(cone.features);
-            } else if (cone.confidence > 0.5f) {
-                cone.features.frame_id = frame_counter_;
-                cone.features.cluster_id = static_cast<int>(i);
-                cluster_logger_->addCluster(cone.features);
-            }
+            cone.features.frame_id = frame_counter_;
+            cone.features.cluster_id = static_cast<int>(i);
+            cluster_logger_->addCluster(cone.features);
         }
 
         if (cone.confidence > 0.5f) {
@@ -823,6 +883,7 @@ void PerceptionNode::handoverToVisualization(const sensor_msgs::msg::PointCloud2
     }
 
     // Always populate the essential point clouds for the fusion node
+    int cone_id = 1;
     for (const auto& cone : final_cones) {
         // Centroid PointCloud Point
         PointT p_out;
@@ -832,8 +893,13 @@ void PerceptionNode::handoverToVisualization(const sensor_msgs::msg::PointCloud2
         
         // Accumulate raw points belonging to this validated cone
         if (cone.cloud) {
+            // Overwrite intensity with unique cone_id to preserve clustering for the fusion node
+            for (auto& pt : cone.cloud->points) {
+                pt.intensity = static_cast<float>(cone_id);
+            }
             *(viz_data->cone_points) += *cone.cloud;
         }
+        cone_id++;
     }
     
     viz_queue_.push_back(std::move(viz_data));

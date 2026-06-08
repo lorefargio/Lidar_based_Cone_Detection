@@ -23,14 +23,14 @@ public:
     TransformManager(const rclcpp::Clock::SharedPtr& clock,
                      const std::vector<double>& rot,
                      const std::vector<double>& trans,
-                     double roll_adj, double pitch_adj, double yaw_adj);
+                     double roll_deg, double pitch_deg, double yaw_deg);
 
     ~TransformManager() = default;
 
     /**
      * @brief Computes rotation matrix from roll, pitch, and yaw Euler angles.
      */
-    Eigen::Matrix3d getEulerRotationMatrix(double roll_deg, double pitch_deg, double yaw_deg);
+    Eigen::Matrix3d getEulerRotationMatrix(double roll_rad, double pitch_rad, double yaw_rad);
 
     /**
      * @brief Injects standard coordinate frames into TF2 buffer as dynamic fallbacks.

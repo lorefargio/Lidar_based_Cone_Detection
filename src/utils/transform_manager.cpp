@@ -8,7 +8,7 @@ namespace fs_fusion {
 TransformManager::TransformManager(const rclcpp::Clock::SharedPtr& clock,
                                    const std::vector<double>& rot,
                                    const std::vector<double>& trans,
-                                   double roll_adj, double pitch_adj, double yaw_adj) {
+                                   double roll_deg, double pitch_deg, double yaw_deg) {
     
     tf_buffer_ = std::make_shared<tf2_ros::Buffer>(clock);
     tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
@@ -21,7 +21,11 @@ TransformManager::TransformManager(const rclcpp::Clock::SharedPtr& clock,
     }
     t_ext_ = (trans.size() == 3) ? Eigen::Vector3d(trans[0], trans[1], trans[2]) : Eigen::Vector3d::Zero();
 
-    Eigen::Matrix3d R_correction = getEulerRotationMatrix(roll_adj, pitch_adj, yaw_adj);
+    // Convert degrees to radians explicitly at the call site (before calling getEulerRotationMatrix)
+    double roll_rad = roll_deg * M_PI / 180.0;
+    double pitch_rad = pitch_deg * M_PI / 180.0;
+    double yaw_rad = yaw_deg * M_PI / 180.0;
+    Eigen::Matrix3d R_correction = getEulerRotationMatrix(roll_rad, pitch_rad, yaw_rad);
     R_ext_ = R_ext_base * R_correction;
 
     T_lidar_to_camera_opt_ = Eigen::Matrix4d::Identity();
@@ -29,14 +33,10 @@ TransformManager::TransformManager(const rclcpp::Clock::SharedPtr& clock,
     T_lidar_to_camera_opt_.block<3, 1>(0, 3) = t_ext_;
 }
 
-Eigen::Matrix3d TransformManager::getEulerRotationMatrix(double roll_deg, double pitch_deg, double yaw_deg) {
-    double r = roll_deg * M_PI / 180.0;
-    double p = pitch_deg * M_PI / 180.0;
-    double y = yaw_deg * M_PI / 180.0;
-
-    Eigen::AngleAxisd roll(r, Eigen::Vector3d::UnitX());
-    Eigen::AngleAxisd pitch(p, Eigen::Vector3d::UnitY());
-    Eigen::AngleAxisd yaw(y, Eigen::Vector3d::UnitZ());
+Eigen::Matrix3d TransformManager::getEulerRotationMatrix(double roll_rad, double pitch_rad, double yaw_rad) {
+    Eigen::AngleAxisd roll(roll_rad, Eigen::Vector3d::UnitX());
+    Eigen::AngleAxisd pitch(pitch_rad, Eigen::Vector3d::UnitY());
+    Eigen::AngleAxisd yaw(yaw_rad, Eigen::Vector3d::UnitZ());
 
     return (yaw * pitch * roll).matrix();
 }

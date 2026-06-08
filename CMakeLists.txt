@@ -62,7 +62,6 @@ add_executable(perception_node
   src/utils/cluster_logger.cpp
   src/utils/transform_manager.cpp
   src/utils/imu_interpolator.cpp
-  src/utils/deskew_engine.cpp
   src/utils/clock_aligner.cpp
 )
 

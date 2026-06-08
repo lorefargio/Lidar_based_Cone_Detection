@@ -31,6 +31,13 @@ public:
     void updateLidarTime(uint64_t ts_ns, const rclcpp::Logger& logger);
 
     /**
+     * @brief Dynamically updates and smooths the clock offset between LiDAR hardware time and PC system time.
+     * @param raw_lidar_ts_ns LiDAR hardware timestamp in nanoseconds.
+     * @param pc_recv_ts_ns PC system timestamp at message reception in nanoseconds.
+     */
+    void updateLidarTimeDynamic(uint64_t raw_lidar_ts_ns, uint64_t pc_recv_ts_ns);
+
+    /**
      * @brief Checks if clock alignment calibration has completed.
      * @return True if initialized, false otherwise.
      */
@@ -53,7 +60,9 @@ private:
     mutable std::mutex mutex_;
     uint64_t first_cam_ts_{0};
     uint64_t first_lidar_ts_{0};
+    uint64_t latest_cam_ts_{0};
     int64_t initial_clock_offset_{0};
+    int64_t running_offset_{0};
     bool clock_offset_initialized_{false};
 };
 
