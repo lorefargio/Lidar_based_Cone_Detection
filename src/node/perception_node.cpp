@@ -317,7 +317,7 @@ void PerceptionNode::initializeDeskewing() {
     this->declare_parameter<bool>("use_deskewing", true);
     this->declare_parameter<std::string>("imu_topic", "/zed/zed_node/imu/data");
     this->declare_parameter<std::string>("imu_frame", "zed_imu_link");
-    this->declare_parameter<double>("imu_lowpass_cutoff", 30.0);
+    this->declare_parameter<double>("imu_lowpass_cutoff", 15.0);
     this->declare_parameter<std::vector<double>>("extrinsic_rotation", {0.999743, 0.0226629, 7.2829e-10, 8.06016e-10, -3.42052e-09, -1.0, -0.0226629, 0.999743, -3.43791e-09});
     this->declare_parameter<std::vector<double>>("extrinsic_translation", {0.0543494, -0.0235914, -0.0488917});
     this->declare_parameter<double>("roll_deg", -0.4);
@@ -657,8 +657,14 @@ void PerceptionNode::performDeskewing(const sensor_msgs::msg::PointCloud2::Share
 
             // 4. Apply high-precision second-order translation correction (linear velocity + dynamic kinematic acceleration)
             Eigen::Vector3d accel_cam = imu_interpolator_->getInterpolatedLinearAccel(pt_ts_ns);
+            
+            // Add centripetal acceleration due to the lever arm between the IMU and the LiDAR
+            Eigen::Vector3d r_im = T_im_l.block<3, 1>(0, 3);
+            Eigen::Vector3d centripetal_im = omega_cam.cross(omega_cam.cross(r_im));
+            Eigen::Vector3d total_accel_im = accel_cam + centripetal_im;
+            
             // Rotate acceleration to LiDAR frame and subtract gravity along the rotated gravity vector
-            Eigen::Vector3d accel_l = R_im_l.transpose() * accel_cam;
+            Eigen::Vector3d accel_l = R_im_l.transpose() * total_accel_im;
             accel_l -= g_l;
 
             Eigen::Vector3d p_deskewed_l = p_rotated + dt * v_l + 0.5 * dt * dt * accel_l;

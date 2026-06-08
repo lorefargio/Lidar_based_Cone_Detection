@@ -96,6 +96,10 @@ def generate_launch_description():
     )
     use_vox_filt_arg = DeclareLaunchArgument('use_voxel_filter', default_value='false')
     vox_size_arg = DeclareLaunchArgument('voxel_size', default_value='0.02')
+    imu_lowpass_cutoff_arg = DeclareLaunchArgument(
+        'imu_lowpass_cutoff', default_value='20.0',
+        description='IMU raw accelerometer/gyro low-pass cutoff frequency in Hz'
+    )
 
     # --- 7. LOGGING & DIAGNOSTICS ---
     log_dir_arg = DeclareLaunchArgument('log_dir', default_value='log_profiler/')
@@ -161,6 +165,7 @@ def generate_launch_description():
             'imu_topic': LaunchConfiguration('imu_topic'),
             'imu_frame': LaunchConfiguration('imu_frame'),
             'world_up_axis': LaunchConfiguration('world_up_axis'),
+            'imu_lowpass_cutoff': LaunchConfiguration('imu_lowpass_cutoff'),
             'deskew_use_translation': LaunchConfiguration('deskew_use_translation'),
             'roll_deg': LaunchConfiguration('roll_deg'),
             'pitch_deg': LaunchConfiguration('pitch_deg'),
@@ -229,6 +234,7 @@ def generate_launch_description():
         yaw_deg_arg,
         imu_frame_arg,
         world_up_axis_arg,
+        imu_lowpass_cutoff_arg,
         use_vox_filt_arg,
         vox_size_arg,
         log_dir_arg,
