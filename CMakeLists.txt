@@ -26,6 +26,7 @@ endif()
 # --- 4. DEPENDENCIES ---
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(rclcpp_components REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
 find_package(pcl_conversions REQUIRED)
@@ -46,7 +47,7 @@ find_package(PCL REQUIRED)
 find_package(OpenMP)
 
 # --- 5. TARGET DEFINITION ---
-add_executable(perception_node
+add_library(lidar_perception_component SHARED
   src/node/perception_node.cpp
   src/filtering/bin_based_ground_remover.cpp
   src/filtering/slope_based_ground_remover.cpp
@@ -66,7 +67,7 @@ add_executable(perception_node
 )
 
 # --- 6. INCLUDE DIRECTORIES ---
-target_include_directories(perception_node PUBLIC
+target_include_directories(lidar_perception_component PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>
   ${PCL_INCLUDE_DIRS}
@@ -75,12 +76,13 @@ target_include_directories(perception_node PUBLIC
 
 # --- 7. PCL DEFINITIONS ---
 # Required definitions to avoid memory alignment issues between Eigen and PCL
-target_compile_definitions(perception_node PUBLIC ${PCL_DEFINITIONS})
+target_compile_definitions(lidar_perception_component PUBLIC ${PCL_DEFINITIONS})
 
 # --- 8. LINKING ---
 # ROS 2 Dependencies
-ament_target_dependencies(perception_node
+ament_target_dependencies(lidar_perception_component
   rclcpp
+  rclcpp_components
   sensor_msgs
   visualization_msgs
   pcl_conversions
@@ -93,7 +95,7 @@ ament_target_dependencies(perception_node
 )
 
 # External Library Linking
-target_link_libraries(perception_node
+target_link_libraries(lidar_perception_component
   ${PCL_LIBRARIES}
   Eigen3::Eigen
   patchworkpp::ground_seg_cores
@@ -101,23 +103,31 @@ target_link_libraries(perception_node
 
 # Enable OpenMP if found
 if(OpenMP_CXX_FOUND)
-  target_link_libraries(perception_node OpenMP::OpenMP_CXX)
+  target_link_libraries(lidar_perception_component OpenMP::OpenMP_CXX)
 endif()
+
+# Register as Component
+rclcpp_components_register_node(lidar_perception_component
+  PLUGIN "lidar_perception::PerceptionNode"
+  EXECUTABLE perception_node
+)
 
 # --- 9. INTERPROCEDURAL OPTIMIZATION (IPO/LTO) ---
 # Enables cross-file inlining and advanced linker optimizations.
 include(CheckIPOSupported)
 check_ipo_supported(RESULT result OUTPUT output)
 if(result)
-  set_property(TARGET perception_node PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
-  message(STATUS "IPO/LTO enabled for perception_node")
+  set_property(TARGET lidar_perception_component PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+  message(STATUS "IPO/LTO enabled for lidar_perception_component")
 else()
   message(WARNING "IPO/LTO not supported: ${output}")
 endif()
 
 # --- 10. INSTALLATION ---
-install(TARGETS perception_node
-  DESTINATION lib/${PROJECT_NAME}
+install(TARGETS lidar_perception_component
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib
+  RUNTIME DESTINATION bin
 )
 
 install(DIRECTORY include/

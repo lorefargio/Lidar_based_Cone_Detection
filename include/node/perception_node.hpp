@@ -63,7 +63,7 @@ public:
      * Performs parameter declaration, initializes modular pipeline components (ground removers, 
      * clusterers, estimators), and establishes communication interfaces with SensorDataQoS.
      */
-    PerceptionNode();
+    explicit PerceptionNode(const rclcpp::NodeOptions& options = rclcpp::NodeOptions());
 
     /**
      * @brief Finalizes the PerceptionNode.

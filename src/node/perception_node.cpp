@@ -30,7 +30,7 @@ namespace pcl {
 
 namespace lidar_perception {
 
-PerceptionNode::PerceptionNode() : Node("lidar_perception_node") {
+PerceptionNode::PerceptionNode(const rclcpp::NodeOptions& options) : Node("lidar_perception_node", options) {
     // 1. Initialize parameters and modular pipeline components
     initializeParameters();
     initializeGroundRemover();
@@ -987,11 +987,5 @@ void PerceptionNode::preProcess(const PointCloudPtr& cloud) {
 
 } // namespace lidar_perception
 
-int main(int argc, char **argv) {
-    rclcpp::init(argc, argv);
-    auto node = std::make_shared<lidar_perception::PerceptionNode>();
-    rclcpp::spin(node);
-    rclcpp::shutdown();
-
-    return 0;
-}
+#include <rclcpp_components/register_node_macro.hpp>
+RCLCPP_COMPONENTS_REGISTER_NODE(lidar_perception::PerceptionNode)

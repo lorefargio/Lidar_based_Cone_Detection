@@ -75,7 +75,7 @@ def generate_launch_description():
     imu_topic_arg = DeclareLaunchArgument('imu_topic', default_value='/zed/zed_node/imu/data')
     deskew_trans_arg = DeclareLaunchArgument('deskew_use_translation', default_value='true')
     roll_deg_arg = DeclareLaunchArgument(
-        'roll_deg', default_value='-0.4',
+        'roll_deg', default_value='0.0',
         description='Fine-tune roll correction for extrinsic rotation in degrees'
     )
     pitch_deg_arg = DeclareLaunchArgument(
