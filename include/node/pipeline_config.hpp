@@ -98,7 +98,6 @@ struct PipelineConfig {
     bool use_deskewing = true;
     std::string imu_topic = "/zed/zed_node/imu/data";
     std::string imu_frame = "zed_imu_link";
-    double imu_lowpass_cutoff = 15.0;
     std::vector<double> extrinsic_rotation = {0.999743, 0.0226629, 7.2829e-10, 8.06016e-10, -3.42052e-09, -1.0, -0.0226629, 0.999743, -3.43791e-09};
     std::vector<double> extrinsic_translation = {0.0543494, -0.0235914, -0.0488917};
     double roll_deg = -0.4;

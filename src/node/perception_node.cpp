@@ -156,7 +156,6 @@ void PerceptionNode::initializeParameters() {
     this->declare_parameter<bool>("use_deskewing", true);
     this->declare_parameter<std::string>("imu_topic", "/zed/zed_node/imu/data");
     this->declare_parameter<std::string>("imu_frame", "zed_imu_link");
-    this->declare_parameter<double>("imu_lowpass_cutoff", 15.0);
     this->declare_parameter<std::vector<double>>("extrinsic_rotation", {0.999743, 0.0226629, 7.2829e-10, 8.06016e-10, -3.42052e-09, -1.0, -0.0226629, 0.999743, -3.43791e-09});
     this->declare_parameter<std::vector<double>>("extrinsic_translation", {0.0543494, -0.0235914, -0.0488917});
     this->declare_parameter<double>("roll_deg", -0.4);
@@ -237,7 +236,6 @@ void PerceptionNode::loadParametersToConfig() {
     config_.use_deskewing = this->get_parameter("use_deskewing").as_bool();
     config_.imu_topic = this->get_parameter("imu_topic").as_string();
     config_.imu_frame = this->get_parameter("imu_frame").as_string();
-    config_.imu_lowpass_cutoff = this->get_parameter("imu_lowpass_cutoff").as_double();
     config_.extrinsic_rotation = this->get_parameter("extrinsic_rotation").as_double_array();
     config_.extrinsic_translation = this->get_parameter("extrinsic_translation").as_double_array();
     config_.roll_deg = this->get_parameter("roll_deg").as_double();

@@ -97,7 +97,7 @@ def generate_launch_description():
     use_vox_filt_arg = DeclareLaunchArgument('use_voxel_filter', default_value='false')
     vox_size_arg = DeclareLaunchArgument('voxel_size', default_value='0.02')
     imu_lowpass_cutoff_arg = DeclareLaunchArgument(
-        'imu_lowpass_cutoff', default_value='20.0',
+        'imu_lowpass_cutoff', default_value='10.0',
         description='IMU raw accelerometer/gyro low-pass cutoff frequency in Hz'
     )
 

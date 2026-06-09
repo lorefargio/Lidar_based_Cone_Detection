@@ -48,10 +48,12 @@ public:
     Eigen::Vector3d getInterpolatedLinearAccel(uint64_t ts_ns) const;
 
     /**
-     * @brief Sets the cutoff frequency for the low-pass filter on incoming IMU measurements.
-     * @param cutoff_hz Cutoff frequency in Hz. A value <= 0 disables filtering.
+     * @brief Retrieves all cached IMU samples within a specific time window.
+     * @param start_ts_ns Start timestamp in nanoseconds.
+     * @param end_ts_ns End timestamp in nanoseconds.
+     * @return Vector of ImuData samples.
      */
-    void setLowPassCutoff(double cutoff_hz);
+    std::vector<ImuData> getImuDataInWindow(uint64_t start_ts_ns, uint64_t end_ts_ns) const;
 
     /**
      * @brief Thread-safe getter for the current size of the IMU history cache.
@@ -65,7 +67,6 @@ public:
 private:
     mutable std::mutex mutex_;
     std::vector<ImuData> imu_history_;
-    double cutoff_hz_{30.0}; ///< Default low-pass cutoff frequency in Hz
 };
 
 } // namespace fs_fusion

@@ -4,6 +4,7 @@
 
 #include <pcl/common/centroid.h>
 #include <pcl/common/impl/centroid.hpp>
+#include <Eigen/Geometry>
 
 namespace lidar_perception {
 
@@ -50,7 +51,6 @@ void PerceptionPipeline::initialize(const PipelineConfig& config, const rclcpp::
             config.roll_deg, config.pitch_deg, config.yaw_deg);
             
         imu_interpolator_ = std::make_unique<fs_fusion::ImuInterpolator>();
-        imu_interpolator_->setLowPassCutoff(config.imu_lowpass_cutoff);
     }
 }
 
@@ -151,15 +151,136 @@ void PerceptionPipeline::performDeskewing(
         Eigen::Matrix3d R_w_l = T_w_l.block<3, 3>(0, 0);
         Eigen::Vector3d v_l = R_w_l.transpose() * v_world;
 
-        // Rotate IMU angular velocity
-        Eigen::Matrix4d T_im_l = tf_manager_->lookupTransformSafe(config.imu_frame, frame_id, target_ts_ns);
-        Eigen::Matrix3d R_im_l = T_im_l.block<3, 3>(0, 0);
-        
-        // Optimisation: Precompute static lever arm translation vector outside the parallel loop
-        Eigen::Vector3d t_im_l = T_im_l.block<3, 1>(0, 3);
+        // Lookup lever arm translation from TF buffer (origin of IMU/camera in LiDAR frame)
+        Eigen::Matrix4d T_l_im = tf_manager_->lookupTransformSafe(frame_id, config.imu_frame, target_ts_ns);
+        Eigen::Vector3d L_l = T_l_im.block<3, 1>(0, 3);
+
+        // Precompute camera-to-LiDAR static rotation matrix based on axis mapping:
+        // x_L = x_C, y_L = z_C, z_L = -y_C
+        Eigen::Matrix3d R_l_c;
+        R_l_c << 1.0,  0.0, 0.0,
+                 0.0,  0.0, 1.0,
+                 0.0, -1.0, 0.0;
 
         // Precompute gravity vector in LiDAR local frame
         Eigen::Vector3d g_l = R_w_l.transpose() * g_world_;
+
+        // 3. Pre-integrate IMU trajectory
+        // Get all IMU samples in a 300ms window centered on target_ts_ns
+        std::vector<fs_fusion::ImuData> imu_samples = imu_interpolator_->getImuDataInWindow(
+            target_ts_ns - 150000000ULL, // -150ms
+            target_ts_ns + 150000000ULL  // +150ms
+        );
+
+        struct PoseState {
+            uint64_t ts_ns;
+            Eigen::Quaterniond q; // rotation relative to target
+            Eigen::Vector3d p;    // translation relative to target
+        };
+
+        std::vector<PoseState> trajectory;
+
+        if (imu_samples.size() >= 2) {
+            int N = imu_samples.size();
+            std::vector<Eigen::Quaterniond> rel_q(N);
+            std::vector<Eigen::Vector3d> rel_x(N);
+            std::vector<Eigen::Vector3d> rel_v(N);
+
+            // Find closest sample index to target_ts_ns
+            int m = 0;
+            uint64_t min_dt = 999999999999ULL;
+            for (int k = 0; k < N; ++k) {
+                uint64_t diff = (imu_samples[k].ts_ns > target_ts_ns) ? 
+                                (imu_samples[k].ts_ns - target_ts_ns) : 
+                                (target_ts_ns - imu_samples[k].ts_ns);
+                if (diff < min_dt) {
+                    min_dt = diff;
+                    m = k;
+                }
+            }
+
+            // Initialize at closest index m (corresponding to target)
+            rel_q[m] = Eigen::Quaterniond::Identity();
+            rel_x[m] = Eigen::Vector3d::Zero();
+            rel_v[m] = v_l;
+
+            // Integrate Forward: k from m to N - 1
+            for (int k = m; k < N - 1; ++k) {
+                double dt = (static_cast<double>(imu_samples[k+1].ts_ns) - static_cast<double>(imu_samples[k].ts_ns)) / 1e9;
+                if (dt <= 0.0 || dt > 0.1) dt = 0.01; // fallback to 100Hz delta
+
+                Eigen::Vector3d omega_mean_cam = 0.5 * (imu_samples[k].angular_vel + imu_samples[k+1].angular_vel);
+                Eigen::Vector3d accel_mean_cam = 0.5 * (imu_samples[k].linear_accel + imu_samples[k+1].linear_accel);
+
+                Eigen::Vector3d omega_l = R_l_c * omega_mean_cam;
+                Eigen::Vector3d accel_proper_l = R_l_c * accel_mean_cam;
+
+                // Propagate rotation: rel_q[k+1] = rel_q[k] * dq
+                Eigen::Vector3d rot_vec = dt * omega_l;
+                Eigen::Quaterniond dq = Eigen::Quaterniond::Identity();
+                double angle = rot_vec.norm();
+                if (angle > 1e-8) {
+                    dq = Eigen::Quaterniond(Eigen::AngleAxisd(angle, rot_vec.normalized()));
+                }
+                rel_q[k+1] = rel_q[k] * dq;
+                rel_q[k+1].normalize();
+
+                // Compute centripetal acceleration in LiDAR frame at t_k
+                Eigen::Vector3d centripetal_l = omega_l.cross(omega_l.cross(L_l));
+                Eigen::Vector3d total_accel_proper_l = accel_proper_l + centripetal_l;
+
+                // Rotate proper acceleration to target LiDAR coordinate frame (at t_0)
+                Eigen::Vector3d accel_proper_target = rel_q[k] * total_accel_proper_l;
+                Eigen::Vector3d accel_kinematic_target = accel_proper_target - g_l;
+
+                rel_x[k+1] = rel_x[k] + rel_v[k] * dt + 0.5 * accel_kinematic_target * dt * dt;
+                rel_v[k+1] = rel_v[k] + accel_kinematic_target * dt;
+            }
+
+            // Integrate Backward: k from m down to 1
+            for (int k = m; k > 0; --k) {
+                double dt = (static_cast<double>(imu_samples[k-1].ts_ns) - static_cast<double>(imu_samples[k].ts_ns)) / 1e9; // dt is negative
+                if (std::abs(dt) > 0.1) dt = -0.01;
+
+                Eigen::Vector3d omega_mean_cam = 0.5 * (imu_samples[k].angular_vel + imu_samples[k-1].angular_vel);
+                Eigen::Vector3d accel_mean_cam = 0.5 * (imu_samples[k].linear_accel + imu_samples[k-1].linear_accel);
+
+                Eigen::Vector3d omega_l = R_l_c * omega_mean_cam;
+                Eigen::Vector3d accel_proper_l = R_l_c * accel_mean_cam;
+
+                // Propagate rotation: rel_q[k-1] = rel_q[k] * dq
+                Eigen::Vector3d rot_vec = dt * omega_l;
+                Eigen::Quaterniond dq = Eigen::Quaterniond::Identity();
+                double angle = rot_vec.norm();
+                if (angle > 1e-8) {
+                    dq = Eigen::Quaterniond(Eigen::AngleAxisd(angle, rot_vec.normalized()));
+                }
+                rel_q[k-1] = rel_q[k] * dq;
+                rel_q[k-1].normalize();
+
+                // Compute centripetal acceleration in LiDAR frame at t_k
+                Eigen::Vector3d centripetal_l = omega_l.cross(omega_l.cross(L_l));
+                Eigen::Vector3d total_accel_proper_l = accel_proper_l + centripetal_l;
+
+                // Rotate proper acceleration to target LiDAR coordinate frame (at t_0)
+                Eigen::Vector3d accel_proper_target = rel_q[k] * total_accel_proper_l;
+                Eigen::Vector3d accel_kinematic_target = accel_proper_target - g_l;
+
+                // Integrate backward (dt is negative)
+                rel_x[k-1] = rel_x[k] + rel_v[k] * dt + 0.5 * accel_kinematic_target * dt * dt;
+                rel_v[k-1] = rel_v[k] + accel_kinematic_target * dt;
+            }
+
+            // Fill trajectory
+            trajectory.resize(N);
+            for (int k = 0; k < N; ++k) {
+                trajectory[k].ts_ns = imu_samples[k].ts_ns;
+                trajectory[k].q = rel_q[k];
+                trajectory[k].p = rel_x[k];
+            }
+        }
+
+        bool trajectory_ok = (trajectory.size() >= 2);
 
         int points_num = processing_cloud->points.size();
         double total_displacement = 0.0;
@@ -176,37 +297,54 @@ void PerceptionPipeline::performDeskewing(
 
             if (std::abs(dt) > 0.15) continue;
 
-            // Interpolate IMU angular velocity
-            Eigen::Vector3d omega_cam = imu_interpolator_->getInterpolatedAngularVel(pt_ts_ns);
-
-            // 1. Lever-Arm Compensation
             Eigen::Vector3d p_l(p.x, p.y, p.z);
-            Eigen::Vector3d p_im = R_im_l * p_l + t_im_l;
+            Eigen::Vector3d p_deskewed_l;
 
-            // 2. Rotate the point about center of rotation
-            Eigen::Vector3d rot_vec = dt * omega_cam;
-            double theta = rot_vec.norm();
-            Eigen::Vector3d p_im_rotated = p_im;
-            if (theta > 1e-6) {
-                Eigen::Vector3d axis = rot_vec.normalized();
-                p_im_rotated = p_im * std::cos(theta) + axis.cross(p_im) * std::sin(theta) +
-                               axis * axis.dot(p_im) * (1.0 - std::cos(theta));
+            if (trajectory_ok) {
+                // Find adjacent poses in pre-integrated trajectory
+                auto it = std::lower_bound(trajectory.begin(), trajectory.end(), pt_ts_ns,
+                    [](const PoseState& s, uint64_t t) { return s.ts_ns < t; });
+
+                if (it == trajectory.begin()) {
+                    Eigen::Vector3d p_lever = p_l - L_l;
+                    p_deskewed_l = trajectory.front().q * p_lever + L_l + trajectory.front().p;
+                } else if (it == trajectory.end()) {
+                    Eigen::Vector3d p_lever = p_l - L_l;
+                    p_deskewed_l = trajectory.back().q * p_lever + L_l + trajectory.back().p;
+                } else {
+                    const auto& s_prev = *(it - 1);
+                    const auto& s_next = *it;
+                    double dt_seg = static_cast<double>(s_next.ts_ns - s_prev.ts_ns) / 1e9;
+                    double alpha = 0.0;
+                    if (dt_seg > 1e-8) {
+                        alpha = static_cast<double>(pt_ts_ns - s_prev.ts_ns) / (dt_seg * 1e9);
+                    }
+                    alpha = std::max(0.0, std::min(1.0, alpha));
+
+                    // Fast LERP for quaternions
+                    Eigen::Quaterniond q_pt;
+                    q_pt.coeffs() = (1.0 - alpha) * s_prev.q.coeffs() + alpha * s_next.q.coeffs();
+                    q_pt.normalize();
+
+                    Eigen::Vector3d x_pt = (1.0 - alpha) * s_prev.p + alpha * s_next.p;
+
+                    Eigen::Vector3d p_lever = p_l - L_l;
+                    p_deskewed_l = q_pt * p_lever + L_l + x_pt;
+                }
+            } else {
+                // Fallback to simple constant velocity model if trajectory is not available
+                Eigen::Vector3d p_lever = p_l - L_l;
+                Eigen::Vector3d rot_vec = dt * (R_l_c * imu_interpolator_->getInterpolatedAngularVel(pt_ts_ns));
+                double theta = rot_vec.norm();
+                Eigen::Vector3d p_lever_rotated = p_lever;
+                if (theta > 1e-6) {
+                    Eigen::Vector3d axis = rot_vec.normalized();
+                    p_lever_rotated = p_lever * std::cos(theta) + axis.cross(p_lever) * std::sin(theta) +
+                                     axis * axis.dot(p_lever) * (1.0 - std::cos(theta));
+                }
+                Eigen::Vector3d p_rotated = p_lever_rotated + L_l;
+                p_deskewed_l = p_rotated + dt * v_l;
             }
-
-            // 3. Transform back to native LiDAR frame
-            Eigen::Vector3d p_rotated = R_im_l.transpose() * (p_im_rotated - t_im_l);
-
-            // 4. Second-order translation correction
-            Eigen::Vector3d accel_cam = imu_interpolator_->getInterpolatedLinearAccel(pt_ts_ns);
-            
-            // Centripetal acceleration
-            Eigen::Vector3d centripetal_im = omega_cam.cross(omega_cam.cross(t_im_l));
-            Eigen::Vector3d total_accel_im = accel_cam + centripetal_im;
-            
-            Eigen::Vector3d accel_l = R_im_l.transpose() * total_accel_im;
-            accel_l -= g_l;
-
-            Eigen::Vector3d p_deskewed_l = p_rotated + dt * v_l + 0.5 * dt * dt * accel_l;
 
             double disp = (p_deskewed_l - p_l).norm();
             total_displacement += disp;
