@@ -1,32 +1,59 @@
 # Ground Segmentation and Surface Estimation Analysis
 
-## Theoretical Framework
-Ground segmentation is the foundational stage of the perception pipeline, tasked with the binary classification of the point cloud $\mathcal{P}$ into ground $\mathcal{P}_g$ and non-ground $\mathcal{P}_o$ subsets. This implementation investigates the efficacy of geometric heuristics versus iterative plane-fitting models in high-dynamic environments.
+Ground segmentation divides the pre-processed and deskewed point cloud $\mathcal{P}$ into two disjoint subsets: the traversable ground surface $\mathcal{P}_g$ and the non-ground obstacles $\mathcal{P}_o$. This implementation supports three distinct algorithms.
 
-### 1. Patchwork++: Adaptive and Robust Segmentation
-Following the methodology proposed by Lee et al. (2022), Patchwork++ addresses the limitations of deterministic ground models (e.g., standard GPF or RANSAC) through a multi-stage adaptive process.
+---
 
-#### Concentric Zone Model (CZM)
-To account for the non-uniform distribution of LiDAR points, the $\mathbb{R}^2$ plane is partitioned into concentric zones $\mathcal{Z}_m$ with varying radial and angular resolutions. This discretization mimics the sensor's angular resolution, assigning higher bin densities to the near-field where point density is maximum.
+## 1. Patchwork++: Adaptive and Robust Segmentation
+Patchwork++ represents the state-of-the-art (SOTA) in terrain segmentation, addressing the limitations of traditional GPF (Ground Plane Fitting) or RANSAC through regional estimation and outlier rejection.
 
-#### Reflected Noise Removal (RNR)
-Virtual noise points originating from multi-path reflections (e.g., off vehicle hoods) often appear below the actual ground level, biasing plane estimation. RNR identifies these outliers by evaluating the intensity $\mathcal{I}$ and vertical coordinate $z$ of points in the bottom sensor rings:
-$$\text{Noise if } z < h_{noise} \text{ and } \mathcal{I} < I_{noise}$$
-where $h_{noise}$ is adaptively updated via A-GLE.
+### Concentric Zone Model (CZM)
+To handle the variable density of LiDAR returns, the horizontal plane is divided into Concentric Zones ($\mathcal{Z}$) with higher angular and radial resolutions close to the sensor (where density is high) and coarser resolutions far away:
+*   **Zone 0 (Near-field)**: Dense binning to capture fine terrain variations.
+*   **Zone 3 (Far-field)**: Coarse binning to estimate sparse returns.
 
-#### Region-wise Vertical Plane Fitting (R-VPF)
-In urban or racing environments with vertical structures (e.g., retaining walls), standard Ground Plane Fitting (GPF) may treat wall-points as ground-seeds. R-VPF mitigates this by iteratively identifying vertical components through PCA and removing them from the bin-subset before final ground estimation.
+### Reflected Noise Removal (RNR)
+Multi-path reflections (e.g., off the car's body) appear as virtual points beneath the ground, biasing plane fitting. RNR filters these by checking the intensity $\mathcal{I}$ and height $z$ of returns:
+$$\text{Noise if } z < h_{\text{noise}} \text{ and } \mathcal{I} < I_{\text{noise}}$$
 
-#### Adaptive Ground Likelihood Estimation (A-GLE)
-Rather than using static thresholds, A-GLE dynamically updates the elevation ($e_{\tau,m}$) and flatness ($f_{\tau,m}$) parameters for each zone $\mathcal{Z}_m$ based on the distribution of "definite ground" in previous frames. This enables the system to adapt to varying terrain types (e.g., transitioning from flat asphalt to bumpy grass).
+### Region-wise Vertical Plane Fitting (R-VPF)
+In the presence of vertical structures (e.g. concrete walls or tyre barriers), points on the walls can corrupt the initial ground plane seeds. R-VPF identifies vertical components via PCA and filters them out before performing the final ground estimation.
 
-### 2. Radial Slope Analysis (Slope-Based)
-As an alternative to iterative fitting, this module evaluates the local geometric gradient $\nabla z$ along radial sectors.
-*   **Mathematical Logic**: Given sorted points $\{p_1, \dots, p_n\}$ in a sector, $p_j$ is classified as ground if the slope $\alpha$ relative to the last confirmed ground point $p_{ref}$ satisfies:
-    $$\alpha = \frac{|p_{j,z} - p_{ref,z}|}{||p_{j,xy} - p_{ref,xy}||} < \alpha_{max}$$
-*   **Complexity**: $O(N \log N)$ due to the necessity of radial sorting per sector.
-*   **Performance Note**: While less robust to noise than Patchwork++, the Slope-based approach provides lower latency and is highly effective for detecting the abrupt transition between the track and the cone base.
+### Adaptive Ground Likelihood Estimation (A-GLE)
+Instead of static height limits, A-GLE dynamically updates the height margin ($e_{\tau,m}$) and flat-surface threshold ($f_{\tau,m}$) for each concentric zone based on the distribution of definite ground in previous scans, adapting to track slopes and elevation changes.
 
-## Implementation Optimizations for Real-Time Control
-1.  **Ordered Pre-processing**: Truncation and NaN removal are performed *prior* to any segmentation to ensure the VoxelGrid indices remain within integer bounds, preventing index overflow and associated I/O overhead.
-2.  **Buffer Persistence**: All segmentation modules utilize pre-allocated, persistent memory structures to avoid the non-deterministic latency associated with runtime heap allocations.
+---
+
+## 2. Radial Slope Analysis (Slope-Based)
+The `SlopeBasedGroundRemover` segments points by analyzing the local geometric gradient along angular slices.
+
+*   **Mathematical Logic**:
+    The point cloud is partitioned into $S$ sectors (e.g. 360 slices). Within each slice, points are sorted by radial distance. A point $p_j$ is classified as ground if the slope relative to the last confirmed ground point $p_{\text{ref}}$ is below a maximum incline threshold $\alpha_{\text{max}}$:
+    $$\text{Slope } \alpha = \frac{|p_{j,z} - p_{\text{ref},z}|}{\|p_{j,xy} - p_{\text{ref},xy}\|} < \alpha_{\text{max}}$$
+*   **Evaluation**:
+    *   *Complexity*: $\mathcal{O}(N \log N)$ due to sorting per sector.
+    *   *Pros*: Highly effective for finding the sharp transition at the base of the cones.
+    *   *Cons*: Sensitive to noise and sensor range fluctuations.
+
+---
+
+## 3. Polar Bin-Based Grid (Bin-Based)
+The `BinBasedGroundRemover` is a fast grid-discretized segmentation module.
+
+*   **Mathematical Logic**:
+    The horizontal space is partitioned into a polar grid of segments (radial sectors) and bins (concentric rings). Each point is mapped to coordinates $(s, b)$:
+    $$s = \lfloor \theta / \Delta\theta \rfloor, \quad b = \lfloor r / \Delta r \rfloor$$
+    Within each polar cell $(s, b)$, the algorithm computes the minimum vertical coordinate:
+    $$z_{\text{min}}(s, b) = \min_{p \in \text{cell}(s, b)} p_z$$
+    A point $p$ in cell $(s, b)$ is segmented as ground if it is close to this minimum and lies below a hard cutoff:
+    $$p \in \mathcal{P}_g \quad \text{if} \quad p_z - z_{\text{min}}(s, b) \leq \text{threshold}_{\text{local}} \quad \text{and} \quad p_z \leq \text{cutoff}_{\text{hard}}$$
+*   **Evaluation**:
+    *   *Complexity*: Strictly $\mathcal{O}(N)$ for cell binning and checking.
+    *   *Pros*: Blazing fast; very effective on flat surfaces.
+    *   *Cons*: Struggles on vertical transitions or slopes.
+
+---
+
+## 4. Implementation Details
+1.  **Buffer Persistence**: Pre-allocated memory blocks are used across all segmentation algorithms to prevent dynamic heap allocation latencies.
+2.  **Voxel Grid Downsampling**: An optional voxel filter can downsample the isolated obstacle cloud $\mathcal{P}_o$ afterwards to keep the clustering workload low.

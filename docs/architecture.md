@@ -8,17 +8,19 @@ The pipeline is designed as a sequential execution model, optimized for determin
 
 ```mermaid
 graph TD
-    A[Raw PointCloud2] --> B[Pre-processing]
+    A[Raw PointCloud2] --> B[Pre-processing / Truncation]
     B --> C[Deskewing]
-    C --> D[Ground Removal]
+    C --> V[Voxelization]
+    V --> D[Ground Removal]
     D --> E[Clustering]
     E --> F[Cluster Merging]
     F --> G[Cone Estimation]
-    G --> H[Weighted Spatial Aggregation]
+    G --> H[Spatial Aggregation]
     H --> I[Final Markers]
 
-    subgraph "Phase 1: Stabilization"
-        B -- "2.0cm Voxel Filter" --> C
+    subgraph "Phase 1: Stabilization & Downsampling"
+        B --> C
+        C -- "2.0cm Voxel Filter" --> V
     end
 
     subgraph "Phase 2: Grouping"
@@ -26,17 +28,18 @@ graph TD
     end
 
     subgraph "Phase 3: Classification"
-        G -- "Soft-Pass Hysteresis" --> H
+        G --> H
     end
 ```
 
 ### Stage Descriptions
 
-1.  **Pre-processing**: Rapid spatial truncation and early voxelization. The **2.0cm voxel** size is chosen to leverage the high resolution of the 40-channel LiDAR (0.33° vertical) while reducing total points.
-2.  **Deskewing**: High-frequency IMU integration (NLERP) to compensate for sensor motion during the sweep.
-3.  **Ground Removal**: Binary segmentation of the environment into traversable surface and obstacle candidates (using Patchwork++ or Slope Analysis).
-4.  **Clustering**: Spatial grouping of obstacle points into candidate clusters.
-5.  **Cluster Merging**: Geometric unification of fragmented clusters. Candidates within **0.25m** are merged to form a single volumetric object, improving detection stability for sparse returns.
-6.  **Cone Estimation**: Bayesian-like geometric validation using PCA-derived features (linearity, planarity, scattering) and dynamic thresholds with soft-pass logic.
-7.  **Weighted Spatial Aggregation**: Instead of standard NMS, positions are averaged across nearby candidates to ensure smooth, fluid motion in the output.
-8.  **Final Markers**: Asynchronous publication of visualization markers and semantic point clouds for fusion.
+1.  **Pre-processing / Truncation**: Rapid point-wise spatial truncation and blind-spot removal to clean raw sensor data safely before motion compensation. Because this is point-wise, it does not aggregate or blur points.
+2.  **Deskewing**: High-frequency IMU integration (NLERP) to compensate for sensor motion during the sweep. This must run on raw points before voxelization to prevent motion distortion blurring.
+3.  **Voxelization**: Downsampling the deskewed cloud using a 2.0cm voxel grid to leverage the high resolution of the 40-channel LiDAR (0.33° vertical) while reducing total points.
+4.  **Ground Removal**: Binary segmentation of the environment into traversable surface and obstacle candidates (using Patchwork++ or Slope Analysis).
+5.  **Clustering**: Spatial grouping of obstacle points into candidate clusters.
+6.  **Cluster Merging**: Geometric unification of fragmented clusters. Candidates within **0.25m** are merged to form a single volumetric object, improving detection stability for sparse returns.
+7.  **Cone Estimation**: Bayesian-like geometric validation using PCA-derived features (linearity, planarity, scattering) and dynamic thresholds with soft-pass logic.
+8.  **Spatial Aggregation**: Position averaging across nearby candidates (unweighted NMS equivalent) to ensure stable output.
+9.  **Final Markers**: Asynchronous publication of visualization markers and semantic point clouds for fusion.

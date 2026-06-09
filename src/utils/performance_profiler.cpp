@@ -57,6 +57,11 @@ void PerformanceProfiler::endFrame(int cones) {
     frames_.push_back(current_frame_data_);
 }
 
+void PerformanceProfiler::setDeskewMetrics(double avg_translation, double max_translation) {
+    current_frame_data_.deskew_avg_translation_m = avg_translation;
+    current_frame_data_.deskew_max_translation_m = max_translation;
+}
+
 void PerformanceProfiler::saveToJSON(const std::string& filepath) {
     std::ofstream out(filepath);
     if (!out.is_open()) {
@@ -84,7 +89,9 @@ void PerformanceProfiler::saveToJSON(const std::string& filepath) {
         out << "      \"estimation_ms\": " << std::fixed << std::setprecision(3) << f.estimation_ms << ",\n";
         out << "      \"duplicate_ms\": " << std::fixed << std::setprecision(3) << f.duplicate_ms << ",\n";
         out << "      \"total_ms\": " << std::fixed << std::setprecision(3) << f.total_ms << ",\n";
-        out << "      \"cones_detected\": " << f.cones_detected << "\n";
+        out << "      \"cones_detected\": " << f.cones_detected << ",\n";
+        out << "      \"deskew_avg_translation_m\": " << std::fixed << std::setprecision(5) << f.deskew_avg_translation_m << ",\n";
+        out << "      \"deskew_max_translation_m\": " << std::fixed << std::setprecision(5) << f.deskew_max_translation_m << "\n";
         out << "    }";
         if (i < frames_.size() - 1) {
             out << ",";

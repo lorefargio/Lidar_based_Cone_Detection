@@ -24,6 +24,8 @@ struct FrameData {
     double duplicate_ms = 0.0;      ///< Time taken for the duplicate suppression stage (ms).
     double total_ms = 0.0;          ///< Total end-to-end processing time (ms).
     int cones_detected = 0;         ///< Number of cones successfully detected in the frame.
+    double deskew_avg_translation_m = 0.0; ///< Average distance resolved by deskewing per point (m).
+    double deskew_max_translation_m = 0.0; ///< Maximum distance resolved by deskewing (m).
 };
 
 /**
@@ -69,6 +71,7 @@ public:
      * @param phase Identifier for the stage to stop profiling.
      */
     void stopTimer(const std::string& phase);
+    void setDeskewMetrics(double avg_translation, double max_translation);
 
     /**
      * @brief Retrieves the end-to-end latency of the most recently processed frame.

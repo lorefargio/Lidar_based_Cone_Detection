@@ -49,6 +49,8 @@ find_package(OpenMP)
 # --- 5. TARGET DEFINITION ---
 add_library(lidar_perception_component SHARED
   src/node/perception_node.cpp
+  src/node/perception_pipeline.cpp
+  src/node/visualization_bridge.cpp
   src/filtering/bin_based_ground_remover.cpp
   src/filtering/slope_based_ground_remover.cpp
   src/filtering/patchworkpp_ground_remover.cpp
