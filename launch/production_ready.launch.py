@@ -107,6 +107,7 @@ def generate_launch_description():
     log_all_clusters_arg = DeclareLaunchArgument('log_all_clusters', default_value='false', description='Log all clusters for recall analysis')
     debug_freq_arg = DeclareLaunchArgument('debug_pub_freq', default_value='50') # Slow down debug publishing in production
     debug_arg = DeclareLaunchArgument('debug', default_value='false', description='Toggle debug visualization topics')
+    use_deskewing_arg = DeclareLaunchArgument('use_deskewing', default_value='true')
 
     # LiDAR Perception Node
     perception_node = Node(
@@ -179,6 +180,7 @@ def generate_launch_description():
             'log_all_clusters': LaunchConfiguration('log_all_clusters'),
             'debug_pub_freq': LaunchConfiguration('debug_pub_freq'),
             'debug': LaunchConfiguration('debug'),
+            'use_deskewing': LaunchConfiguration('use_deskewing'),
         }]
     )
 
@@ -242,6 +244,7 @@ def generate_launch_description():
         log_all_clusters_arg,
         debug_freq_arg,
         debug_arg,
+        use_deskewing_arg,
         rule_pts_cap_arg,
         merge_dist_arg,
         tracking_match_dist_arg,

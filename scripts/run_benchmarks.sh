@@ -12,7 +12,6 @@ ROSBAG_PATH=$(cd "$1" && pwd)
 
 # --- Configuration ---
 RESULTS_DIR="${PERCEPTION_LOG_DIR:-log_profiler}"
-NODE_NAME="perception_node"
 USE_DESKEWING=true
 
 # 1. Clustering Algorithms to test (Ground Remover: patchworkpp)
@@ -29,8 +28,9 @@ cleanup() {
 }
 trap cleanup SIGINT SIGTERM
 
-# Prepare output directory
+# Prepare output directory and clean up old profiling logs to prevent mixups
 mkdir -p "$RESULTS_DIR"
+rm -f "$RESULTS_DIR"/profiler_*.json "$RESULTS_DIR"/config_*.json "$RESULTS_DIR"/clusters_*.csv
 
 echo "=========================================================="
 echo "   LiDAR Perception Benchmark Session: Starting"
@@ -42,13 +42,12 @@ echo -e "\n>>> PHASE 1: Testing Clustering Algorithms (Ground: patchworkpp)"
 for ALGO in "${CLUSTERING_ALGOS[@]}"; do
     echo -e "\nProcessing Clustering: \e[1;34m$ALGO\e[0m"
 
-    setsid ros2 run lidar_perception $NODE_NAME --ros-args \
-        -p clustering_algorithm:=$ALGO \
-        -p ground_remover_type:=patchworkpp \
-        -p use_deskewing:=$USE_DESKEWING \
-        -p profile_name:="${ALGO}_patchworkpp" \
-        -p log_dir:="$RESULTS_DIR" \
-        -p bag_path:="$ROSBAG_PATH" &
+    setsid ros2 launch lidar_perception production_ready.launch.py \
+        clustering_algorithm:=$ALGO \
+        ground_remover_type:=patchworkpp \
+        use_deskewing:=$USE_DESKEWING \
+        profile_name:="${ALGO}_patchworkpp" \
+        log_dir:="$RESULTS_DIR" &
     NODE_PID=$!
 
     sleep 3
@@ -72,13 +71,12 @@ for GR_ALGO in "${GROUND_ALGOS[@]}"; do
 
     echo -e "\nProcessing Ground Removal: \e[1;32m$GR_ALGO\e[0m"
     
-    setsid ros2 run lidar_perception $NODE_NAME --ros-args \
-        -p clustering_algorithm:=grid \
-        -p ground_remover_type:=$GR_ALGO \
-        -p use_deskewing:=$USE_DESKEWING \
-        -p profile_name:="grid_${GR_ALGO}" \
-        -p log_dir:="$RESULTS_DIR" \
-        -p bag_path:="$ROSBAG_PATH" &
+    setsid ros2 launch lidar_perception production_ready.launch.py \
+        clustering_algorithm:=grid \
+        ground_remover_type:=$GR_ALGO \
+        use_deskewing:=$USE_DESKEWING \
+        profile_name:="grid_${GR_ALGO}" \
+        log_dir:="$RESULTS_DIR" &
     NODE_PID=$!
     
     sleep 3
