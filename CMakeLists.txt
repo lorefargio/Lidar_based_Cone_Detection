@@ -21,6 +21,15 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     -ffast-math
     -DNDEBUG
   )
+
+  # Target the host CPU architecture (AVX2, FMA, SSE4.2, etc. on x86)
+  # This provides a massive speedup for heavy math calculations in Eigen and PCL.
+  include(CheckCXXCompilerFlag)
+  check_cxx_compiler_flag("-march=native" COMPILER_SUPPORTS_MARCH_NATIVE)
+  if(COMPILER_SUPPORTS_MARCH_NATIVE)
+    add_compile_options(-march=native)
+    message(STATUS "Enabled CPU host-specific vectorization flags (-march=native)")
+  endif()
 endif()
 
 # --- 4. DEPENDENCIES ---
