@@ -98,7 +98,8 @@ def plot_frequency_comparison(df):
         })
         
         plt.figure(figsize=(10, 6))
-        sns.boxplot(x='frequency', y=melted_df['max_displacement'] * 100.0, data=melted_df, palette="muted", width=0.5)
+        melted_df['max_displacement_cm'] = melted_df['max_displacement'] * 100.0
+        sns.boxplot(x='frequency', y='max_displacement_cm', data=melted_df, palette="muted", width=0.5)
         plt.title(f"Max Scan Distortion Comparison: 10Hz vs 20Hz ({algo})", fontsize=14, pad=15)
         plt.xlabel("LiDAR Scan Frequency", fontsize=12)
         plt.ylabel("Maximum Scan Distortion (cm)", fontsize=12)

@@ -1,22 +1,25 @@
 #!/bin/bash
 
-# --- Configuration ---
-ROSBAG_PATH=/workspace/20260415_Acceleration_Fusion_Synced/
-RESULTS_DIR="${PERCEPTION_LOG_DIR:-log_profiler}"
-NODE_NAME="perception_node"
-
-# 1. Clustering Algorithms to test (Ground Remover: slope_based)
-CLUSTERING_ALGOS=("grid" "euclidean" "depth" "dbscan" "hdbscan" "voxel")
-
-# 2. Ground Removal Algorithms to test (Clustering: grid)
-GROUND_ALGOS=("bin_based" "slope_based" "patchworkpp")
-
 # --- Argument Validation ---
 if [ -z "$1" ] || [ ! -d "$1" ]; then
     echo "Error: Invalid or missing rosbag directory path."
     echo "Usage: $0 /path/to/your/rosbag_dir"
     exit 1
 fi
+
+# Convert to absolute path
+ROSBAG_PATH=$(cd "$1" && pwd)
+
+# --- Configuration ---
+RESULTS_DIR="${PERCEPTION_LOG_DIR:-log_profiler}"
+NODE_NAME="perception_node"
+USE_DESKEWING=true
+
+# 1. Clustering Algorithms to test (Ground Remover: patchworkpp)
+CLUSTERING_ALGOS=("grid" "euclidean" "depth" "dbscan" "hdbscan" "voxel")
+
+# 2. Ground Removal Algorithms to test (Clustering: grid)
+GROUND_ALGOS=("bin_based" "slope_based" "patchworkpp")
 
 # --- Cleanup Function ---
 cleanup() {
@@ -42,7 +45,9 @@ for ALGO in "${CLUSTERING_ALGOS[@]}"; do
     setsid ros2 run lidar_perception $NODE_NAME --ros-args \
         -p clustering_algorithm:=$ALGO \
         -p ground_remover_type:=patchworkpp \
-        -p use_deskewing:=false \
+        -p use_deskewing:=$USE_DESKEWING \
+        -p profile_name:="${ALGO}_patchworkpp" \
+        -p log_dir:="$RESULTS_DIR" \
         -p bag_path:="$ROSBAG_PATH" &
     NODE_PID=$!
 
@@ -59,7 +64,7 @@ done
 # --- Phase 2: Ground Removal Benchmarks ---
 echo -e "\n>>> PHASE 2: Testing Ground Removal Algorithms (Clustering: grid)"
 for GR_ALGO in "${GROUND_ALGOS[@]}"; do
-    # Skip slope_based if already tested in Phase 1 with grid clustering
+    # Skip patchworkpp if already tested in Phase 1 with grid clustering
     if [ "$GR_ALGO" == "patchworkpp" ]; then
         echo -e "\nSkipping Ground Removal: \e[1;32m$GR_ALGO\e[0m (Already tested in Phase 1 with grid)"
         continue
@@ -70,6 +75,9 @@ for GR_ALGO in "${GROUND_ALGOS[@]}"; do
     setsid ros2 run lidar_perception $NODE_NAME --ros-args \
         -p clustering_algorithm:=grid \
         -p ground_remover_type:=$GR_ALGO \
+        -p use_deskewing:=$USE_DESKEWING \
+        -p profile_name:="grid_${GR_ALGO}" \
+        -p log_dir:="$RESULTS_DIR" \
         -p bag_path:="$ROSBAG_PATH" &
     NODE_PID=$!
     
